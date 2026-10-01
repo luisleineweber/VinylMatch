@@ -51,6 +51,8 @@ public final class Config {
             "DISCOGS_CONSUMER_KEY",
             "DISCOGS_CONSUMER_SECRET",
             "DISCOGS_REDIRECT_URI",
+            "JEV_CANDIDATE_MATCHING_ENABLED",
+            "TYPESAFE_API_KEY",
             "PUBLIC_BASE_URL",
             "PORT",
             "CORS_ALLOWED_ORIGINS",
@@ -245,6 +247,14 @@ public final class Config {
 
     public static String getDiscogsRedirectUri() {
         return get("DISCOGS_REDIRECT_URI");
+    }
+
+    public static boolean isJevCandidateMatchingEnabled() {
+        return "true".equalsIgnoreCase(get("JEV_CANDIDATE_MATCHING_ENABLED"));
+    }
+
+    public static String getTypesafeApiKey() {
+        return get("TYPESAFE_API_KEY");
     }
 
     // =========================================================================

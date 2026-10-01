@@ -422,6 +422,24 @@ body {
     gap: 10px;
 }
 
+.curation-jev {
+    margin: 0 0 12px;
+    color: var(--cur-text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.curation-jev.error {
+    color: var(--cur-accent-2);
+}
+
+.candidate-jev-suggestion {
+    margin-top: 4px;
+    color: var(--cur-accent-2);
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .candidate-card {
     display: flex;
     flex-direction: column;

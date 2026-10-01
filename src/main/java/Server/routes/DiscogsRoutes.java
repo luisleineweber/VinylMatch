@@ -8,9 +8,11 @@ import Server.session.DiscogsSession;
 import Server.session.DiscogsSessionStore;
 import Server.session.SpotifySessionStore;
 import com.hctamlyniv.DiscogsService;
+import com.hctamlyniv.Config;
 import com.hctamlyniv.curation.CuratedLinkStore;
 import com.hctamlyniv.curation.RedisCuratedLinkStore;
 import com.hctamlyniv.discogs.model.CurationCandidate;
+import com.hctamlyniv.discogs.JevCandidateRanker;
 import com.hctamlyniv.discogs.model.CuratedLink;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
 import com.hctamlyniv.discogs.model.LibraryFlags;
@@ -46,14 +48,25 @@ public class DiscogsRoutes {
     private final SpotifySessionStore spotifySessionStore;
     private final DiscogsOAuthService oauthService;
     private final CuratedLinkStore curatedLinkStore;
+    private final JevCandidateRanker jevCandidateRanker;
+    private final boolean jevCandidateMatchingEnabled;
     private final Map<String, DiscogsService> serviceCache = new ConcurrentHashMap<>();
 
     public DiscogsRoutes(Supplier<DiscogsService> defaultDiscogsSupplier, DiscogsSessionStore sessionStore, SpotifySessionStore spotifySessionStore) {
+        this(defaultDiscogsSupplier, sessionStore, spotifySessionStore,
+                Config.isJevCandidateMatchingEnabled(), new JevCandidateRanker(Config.getTypesafeApiKey()));
+    }
+
+    DiscogsRoutes(Supplier<DiscogsService> defaultDiscogsSupplier, DiscogsSessionStore sessionStore,
+                  SpotifySessionStore spotifySessionStore, boolean jevCandidateMatchingEnabled,
+                  JevCandidateRanker jevCandidateRanker) {
         this.defaultDiscogsSupplier = defaultDiscogsSupplier;
         this.sessionStore = sessionStore;
         this.spotifySessionStore = spotifySessionStore;
         this.oauthService = new DiscogsOAuthService();
         this.curatedLinkStore = new RedisCuratedLinkStore(new com.fasterxml.jackson.databind.ObjectMapper());
+        this.jevCandidateMatchingEnabled = jevCandidateMatchingEnabled;
+        this.jevCandidateRanker = jevCandidateRanker;
     }
 
     public void register(HttpServer server) {
@@ -594,7 +607,13 @@ public class DiscogsRoutes {
 
             List<CurationCandidate> candidates = discogs.fetchCurationCandidates(
                     artist, album, year, trackTitle, 4);
-            HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates));
+            if (jevCandidateMatchingEnabled) {
+                JevCandidateRanker.Ranking ranking = jevCandidateRanker.rank(
+                        artist, album, year, trackTitle, candidates);
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", ranking.candidates(), "jev", ranking.jev()));
+            } else {
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates));
+            }
         } catch (HttpUtils.RequestTooLargeException e) {
             HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
         } catch (Exception e) {
