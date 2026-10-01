@@ -11,6 +11,8 @@ const curationState = {
     queue: [],
     index: 0,
     candidates: [],
+    jev: null,
+    requestId: 0,
     loading: false,
     saving: false,
 };
@@ -87,6 +89,25 @@ function resetCurationUi(container, message) {
             empty.textContent = message;
         empty.classList.remove("hidden");
     }
+    renderJevDecision(container, null);
+}
+
+function renderJevDecision(container, decision) {
+    const node = select(container, "#curation-jev");
+    if (!node) return;
+    const status = decision?.status;
+    if (!status || status === "skipped") {
+        node.textContent = "";
+        node.classList.add("hidden");
+        node.classList.remove("error");
+        return;
+    }
+    const confidence = typeof decision.confidence === "number"
+        ? ` Jev confidence: ${Math.round(decision.confidence * 100)}%. This shows how strongly Jev favors its answer.`
+        : "";
+    node.textContent = `${decision.message || "Review the candidates yourself."}${confidence}`;
+    node.classList.toggle("error", status === "error");
+    node.classList.remove("hidden");
 }
 
 function setCurationStatus(message, tone = "neutral") {
@@ -231,6 +252,12 @@ function createCandidateCard(container, item, candidate, onCandidateSaved) {
     details.textContent = detailParts.join(" • ") || "Discogs result";
     meta.appendChild(title);
     meta.appendChild(details);
+    if (curationState.jev?.status === "suggested" && curationState.jev.releaseId === candidate.releaseId) {
+        const suggestion = document.createElement("div");
+        suggestion.className = "candidate-jev-suggestion";
+        suggestion.textContent = "Jev suggestion · Review before saving";
+        meta.appendChild(suggestion);
+    }
     const actions = document.createElement("div");
     actions.className = "candidate-actions";
     const selectButton = document.createElement("button");
@@ -296,15 +323,17 @@ async function loadCurationCandidates(container, item) {
                 format: "vinyl",
             }),
         });
-        if (!res.ok)
-            throw new Error("HTTP " + res.status);
+        if (!res.ok) {
+            const apiError = await readApiError(res);
+            throw new Error(apiError?.message || "HTTP " + res.status);
+        }
         const payload = await res.json();
         const discogsCandidates = Array.isArray(payload?.candidates)
-            ? payload.candidates.slice(0, 3)
+            ? payload.candidates
             : [];
-        const normalizedDiscogs = discogsCandidates.map((candidate, index) => ({
+        const normalizedDiscogs = discogsCandidates.map((candidate) => ({
             ...candidate,
-            source: index === 0 ? "Discogs (Vinyl)" : index === 1 ? "Discogs (LP)" : "Discogs (Alt)",
+            source: "Discogs",
         }));
         const query = [item.artist, item.album].filter(Boolean).join(" ");
         const searchTerm = encodeURIComponent(`${query} vinyl`);
@@ -342,12 +371,15 @@ async function loadCurationCandidates(container, item) {
                 year: item.releaseYear,
             },
         ];
-        return [...normalizedDiscogs, ...storeCandidates];
+        return { candidates: [...normalizedDiscogs, ...storeCandidates], jev: payload?.jev || null };
     }
     catch (e) {
         console.warn("Failed to load curation candidates", e);
-        resetCurationUi(container, "Candidate load failed.");
-        return [];
+        return {
+            candidates: [],
+            jev: null,
+            error: "Candidate load failed: " + (e instanceof Error ? e.message : String(e)),
+        };
     }
     finally {
         curationState.loading = false;
@@ -392,6 +424,7 @@ async function selectCandidate(container, item, candidate, button, onCandidateSa
 }
 
 async function showCurationItem(container, step, placeholderImage, onCandidateSaved) {
+    const requestId = ++curationState.requestId;
     if (!curationState.queue.length) {
         resetCurationUi(container, "No playlist.");
         updateCurationProgress(container);
@@ -400,8 +433,16 @@ async function showCurationItem(container, step, placeholderImage, onCandidateSa
     curationState.index = Math.min(Math.max(0, curationState.index + step), curationState.queue.length - 1);
     const current = curationState.queue[curationState.index];
     renderCurationAlbum(container, current, placeholderImage);
+    setCurationStatus("");
+    curationState.jev = null;
+    renderJevDecision(container, null);
     updateCurationProgress(container);
-    curationState.candidates = await loadCurationCandidates(container, current);
+    const result = await loadCurationCandidates(container, current);
+    if (requestId !== curationState.requestId) return;
+    curationState.candidates = result.candidates;
+    curationState.jev = result.jev;
+    if (result.error) setCurationStatus(result.error, "error");
+    renderJevDecision(container, curationState.jev);
     renderCurationCandidates(container, current, curationState.candidates, onCandidateSaved);
 }
 
