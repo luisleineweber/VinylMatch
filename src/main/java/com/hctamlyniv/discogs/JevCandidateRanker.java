@@ -213,13 +213,20 @@ public final class JevCandidateRanker {
     }
 
     private static boolean isExactMatch(String artist, String album, Integer year, CurationCandidate candidate) {
-        if (artist == null || album == null || candidate.artist() == null || candidate.title() == null) return false;
-        if (year != null && !year.equals(candidate.year())) return false;
-        String title = candidate.title();
-        int separator = title.indexOf(" - ");
-        if (separator >= 0) title = title.substring(separator + 3);
-        return normalized(artist).equals(normalized(candidate.artist()))
-                && normalized(album).equals(normalized(title));
+        if (artist == null || album == null || candidate.title() == null) return false;
+        if (year != null && candidate.year() != null && !year.equals(candidate.year())) return false;
+        String candidateArtist = candidate.artist();
+        String candidateAlbum = candidate.title();
+        int separator = candidateAlbum.indexOf(" - ");
+        if (separator > 0) {
+            if (candidateArtist == null || candidateArtist.isBlank()) {
+                candidateArtist = candidateAlbum.substring(0, separator);
+            }
+            candidateAlbum = candidateAlbum.substring(separator + 3);
+        }
+        return candidateArtist != null
+                && normalized(artist).equals(normalized(candidateArtist))
+                && normalized(album).equals(normalized(candidateAlbum));
     }
 
     private static String normalized(String value) {

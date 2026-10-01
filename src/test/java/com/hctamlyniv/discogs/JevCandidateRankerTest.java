@@ -150,6 +150,22 @@ class JevCandidateRankerTest {
     }
 
     @Test
+    void exactDiscogsTitleSkipsJevWhenArtistIsNotSeparate() {
+        AtomicInteger calls = new AtomicInteger();
+        JevCandidateRanker ranker = new JevCandidateRanker(MAPPER, body -> {
+            calls.incrementAndGet();
+            return new JevCandidateRanker.Response(200, "{}");
+        });
+        CurationCandidate candidate = new CurationCandidate(1743771, "Trash80 - Icarus", null,
+                null, "US", "CDr", null, "https://www.discogs.com/release/1743771");
+
+        var result = ranker.rank("Trash80", "Icarus", 2008, null, List.of(candidate));
+
+        assertEquals("skipped", result.jev().status());
+        assertEquals(0, calls.get());
+    }
+
+    @Test
     void uniqueExactMatchAmongCandidatesSkipsJev() {
         AtomicInteger calls = new AtomicInteger();
         JevCandidateRanker ranker = new JevCandidateRanker(MAPPER, body -> {
