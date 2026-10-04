@@ -17,6 +17,7 @@ It's built for collectors, DJs, archivists, and anyone who wants to connect a di
 - Progressive Discogs matching with caching and safe fallbacks
 - Optional Discogs user token/OAuth login (wishlist + library status)
 - Custom vendor links via `config/vendors.json`
+- Quicksearch popup for artists, albums and songs, with album details and artist releases
 - Built-in rate limiting and structured JSON error responses
 
 ## How It Works
@@ -31,6 +32,20 @@ It's built for collectors, DJs, archivists, and anyone who wants to connect a di
 - VinylMatch supports official/curated Spotify playlists when you paste a direct playlist URL (for example `https://open.spotify.com/playlist/...`).
 - Spotify does not provide a public API endpoint to browse/search all official playlists globally.
 - Because of this API limitation, official playlists must be opened via direct URL/ID instead of in-app browsing.
+
+### Quicksearch
+
+Open Quicksearch from the header. Enter at least two characters and choose All, Artists, Albums or Songs.
+The popup shows up to 20 results. The list shows 5½ rows on desktop and scrolls inside the popup.
+Small windows show fewer rows so the search field and close button remain in view.
+
+Select an album to see its track list, Discogs offer count and shop links. Select an artist to browse
+their main releases, including albums, EPs and singles. Use **Load more releases** to browse all pages.
+Song searches show releases that contain the song. All views stay in the popup, and Back restores the result list.
+
+Quicksearch needs `DISCOGS_TOKEN` or a connected Discogs session. Users can connect Discogs on the Playlist page.
+Spotify login is not required for Quicksearch. Discogs offer counts include all formats; marketplace links filter for vinyl.
+HHV, JPC, Amazon and custom vendors provide search links. The app does not check their stock.
 
 ## Matching Strategy (Discogs)
 
@@ -252,6 +267,9 @@ The server exposes REST endpoints under `/api/*`.
 | `/api/auth/logout` | POST | End session |
 | `/api/playlist?id={playlist_id}` | GET | Playlist details + Discogs matches |
 | `/api/user/playlists` | GET | Current user's playlists |
+| `/api/quicksearch?q={query}&type={all,artists,albums,songs}` | GET | Up to 20 Discogs search suggestions |
+| `/api/quicksearch/artist?id={artist_id}&page={page}` | GET | Artist details and paged main releases |
+| `/api/quicksearch/album?id={id}&kind={master,release}` | GET | Selected album, track list and Discogs offers |
 | `/api/discogs/search` | POST | Search Discogs by artist/album/year/track |
 | `/api/discogs/batch` | POST | Batch search for multiple tracks |
 | `/api/discogs/status` | GET | Discogs session status |

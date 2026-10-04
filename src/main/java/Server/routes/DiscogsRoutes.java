@@ -70,6 +70,7 @@ public class DiscogsRoutes {
     }
 
     public void register(HttpServer server) {
+        new QuickSearchRoutes(this::resolveDiscogsService).register(server);
         server.createContext("/api/discogs/batch", this::handleBatch).getFilters().addAll(
             java.util.List.of(ApiFilters.securityHeaders(), ApiFilters.rateLimiting())
         );

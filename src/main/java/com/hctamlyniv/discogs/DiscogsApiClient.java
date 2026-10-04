@@ -3,6 +3,7 @@ package com.hctamlyniv.discogs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hctamlyniv.discogs.model.CurationCandidate;
+import com.hctamlyniv.discogs.model.CatalogResult;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
 import com.hctamlyniv.discogs.model.WishlistEntry;
 import com.hctamlyniv.discogs.model.WishlistResult;
@@ -83,6 +84,28 @@ public class DiscogsApiClient {
 
     public boolean isConfigured() {
         return hasUserTokenAuth() || hasOAuthCredentials();
+    }
+
+    CatalogResult<JsonNode> fetchCatalogResource(String path) throws IOException, InterruptedException {
+        if (!isConfigured()) {
+            return CatalogResult.failure(503, "discogs_not_configured",
+                    "Connect Discogs on the Playlist page, or configure a server Discogs token.");
+        }
+        HttpRequest request = baseRequest(URI.create(apiBase + path))
+                .timeout(Duration.ofSeconds(12)).GET().build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return switch (response.statusCode()) {
+            case 200 -> {
+                JsonNode body = mapper.readTree(response.body());
+                if (body == null || !body.isObject()) throw new IOException("Invalid Discogs catalog response");
+                yield CatalogResult.success(body);
+            }
+            case 404 -> CatalogResult.failure(404, "catalog_not_found", "This Discogs item is no longer available.");
+            case 401, 403 -> CatalogResult.failure(503, "discogs_access_denied",
+                    "Discogs denied access. Reconnect Discogs or check the server token.");
+            case 429 -> CatalogResult.failure(429, "discogs_rate_limited", "Discogs is busy. Please wait before trying again.");
+            default -> CatalogResult.failure(502, "discogs_unavailable", "Discogs is unavailable. Please try again.");
+        };
     }
 
     private boolean hasUserTokenAuth() {

@@ -1,3 +1,5 @@
+import { initQuicksearch } from "./quicksearch.js";
+
 export async function injectHeader() {
     const container = document.getElementById("header");
     if (!container)
@@ -65,6 +67,7 @@ export async function injectHeader() {
         if (!res.ok)
             throw new Error("HTTP " + res.status);
         container.innerHTML = await res.text();
+        initQuicksearch(container.querySelector("#quicksearch-open"));
         initThemeToggle();
         // Aktiver Link markieren
         const rawPath = (location.pathname || "/").toLowerCase().replace(/\/+$/, "") || "/";
