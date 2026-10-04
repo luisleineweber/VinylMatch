@@ -15,12 +15,46 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthRoutesTest {
+
+    @Test
+    void callbackReturnsImmediatelyAfterSuccessfulLogin() throws Exception {
+        AuthRoutes routes = new AuthRoutes(new PlaylistCache(new ObjectMapper()),
+                new SpotifySessionStore(), new TestSpotifyOAuthService());
+        Method method = AuthRoutes.class.getDeclaredMethod("sendCallbackHtml", HttpExchange.class, boolean.class, String.class);
+        method.setAccessible(true);
+        FakeExchange exchange = new FakeExchange("GET", URI.create("http://127.0.0.1/api/auth/callback"));
+
+        method.invoke(routes, exchange, true, "Spotify connected.");
+
+        String body = exchange.responseBody.toString(StandardCharsets.UTF_8);
+        assertFalse(body.contains("setTimeout"), "Login must not add a fixed wait before returning");
+        assertTrue(body.contains("window.location.replace("), "Returning must remove the callback from browser history");
+        assertTrue(body.indexOf("<script>") < body.indexOf("<link"), "Return before loading styles and fonts");
+    }
+
+    @Test
+    void callbackEscapesErrorMessage() throws Exception {
+        AuthRoutes routes = new AuthRoutes(new PlaylistCache(new ObjectMapper()),
+                new SpotifySessionStore(), new TestSpotifyOAuthService());
+        Method method = AuthRoutes.class.getDeclaredMethod("sendCallbackHtml", HttpExchange.class, boolean.class, String.class);
+        method.setAccessible(true);
+        FakeExchange exchange = new FakeExchange("GET", URI.create("http://127.0.0.1/api/auth/callback"));
+        String message = "</script><script>alert('error')</script>";
+
+        method.invoke(routes, exchange, false, message);
+
+        String body = exchange.responseBody.toString(StandardCharsets.UTF_8);
+        assertFalse(body.contains(message));
+        assertTrue(body.contains("&lt;/script&gt;&lt;script&gt;alert(&#39;error&#39;)&lt;/script&gt;"));
+    }
 
     @Test
     void getAccessTokenRefreshesAndPersistsSession() {

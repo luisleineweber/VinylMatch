@@ -116,6 +116,21 @@ class DiscogsRoutesTest {
     }
 
     @Test
+    void callbackReturnsImmediatelyAfterSuccessfulLogin() throws Exception {
+        DiscogsRoutes routes = new DiscogsRoutes(() -> null, new DiscogsSessionStore(), new SpotifySessionStore());
+        Method method = DiscogsRoutes.class.getDeclaredMethod("sendOAuthCallbackHtml", HttpExchange.class, boolean.class, String.class);
+        method.setAccessible(true);
+        FakeExchange exchange = new FakeExchange("GET", URI.create("http://127.0.0.1/api/discogs/oauth/callback"));
+
+        method.invoke(routes, exchange, true, "Discogs connected.");
+
+        String body = exchange.responseBodyAsString();
+        assertFalse(body.contains("setTimeout"), "Login must not add a fixed wait before returning");
+        assertTrue(body.contains("window.location.replace("), "Returning must remove the callback from browser history");
+        assertTrue(body.indexOf("<script>") < body.indexOf("<link"), "Return before loading styles and fonts");
+    }
+
+    @Test
     void callbackHtmlEscapesUserFacingErrorMessage() throws Exception {
         DiscogsRoutes routes = new DiscogsRoutes(() -> null, new DiscogsSessionStore(), new SpotifySessionStore());
         Method method = DiscogsRoutes.class.getDeclaredMethod("sendOAuthCallbackHtml", HttpExchange.class, boolean.class, String.class);
