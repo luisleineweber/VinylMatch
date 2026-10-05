@@ -61,7 +61,7 @@ public class PlaylistAssembler {
         List<TrackData> tracks = new ArrayList<>();
 
         for (PlaylistTrack playlistTrack : playlistTracks) {
-            Object item = playlistTrack.getTrack();
+            Object item = playlistTrack.getItem();
             
             if (item instanceof Track track) {
                 TrackData trackData = convertTrack(track, albumDetailsMap);
