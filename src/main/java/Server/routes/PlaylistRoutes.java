@@ -198,7 +198,7 @@ public class PlaylistRoutes {
             }
 
             SpotifyApi spotifyApi = new SpotifyApi.Builder().setAccessToken(token).build();
-            Paging<PlaylistSimplified> page = spotifyApi.getListOfCurrentUsersPlaylists()
+            Paging<PlaylistSimplified> page = spotifyApi.getCurrentUsersPlaylists()
                     .offset(offset)
                     .limit(limit)
                     .build()
@@ -216,8 +216,8 @@ public class PlaylistRoutes {
                         coverUrl = item.getImages()[0].getUrl();
                     }
                     Integer trackCount = null;
-                    if (item.getTracks() != null) {
-                        trackCount = item.getTracks().getTotal();
+                    if (item.getItems() != null) {
+                        trackCount = item.getItems().getTotal();
                     }
                     String owner = (item.getOwner() != null) ? item.getOwner().getDisplayName() : null;
                     summaries.add(new PlaylistSummary(item.getId(), item.getName(), coverUrl, trackCount, owner));
