@@ -38,6 +38,12 @@
         --playlist-accent: #ff3300;
         --playlist-accent-2: #00ccff;
     }
+
+    :root:not([data-theme]) #header .logo,
+    :root:not([data-theme]) #header .navigation a:not(.spotify-btn),
+    :root:not([data-theme]) #header .theme-toggle {
+        color: #0a0a0a;
+    }
 }
 
 /* Body and layout */
@@ -59,6 +65,10 @@ body {
 #header .navigation a:not(.spotify-btn),
 #header .theme-toggle {
     color: #ffffff;
+}
+
+#header .logo:focus-visible {
+    outline-color: currentColor;
 }
 
 :root[data-theme="dark"] #header .logo,
