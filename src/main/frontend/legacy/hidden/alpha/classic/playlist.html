@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VinylMatch — Playlist</title>
 
-    <script>
-      (() => {
-        try {
-          const theme = localStorage.getItem("vinylmatch_theme");
-          if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-        } catch (_) {}
-      })();
-    </script>
+    <script src="/dist/theme-bootstrap.js"></script>
 
     <link rel="stylesheet" href="/common/header.css">
     <link rel="stylesheet" href="/styles/playlist.css">

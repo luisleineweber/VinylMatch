@@ -49,7 +49,7 @@ public class CorrelationIdFilter extends Filter {
         // Try to get from header
         String correlationId = exchange.getRequestHeaders().getFirst(CORRELATION_ID_HEADER);
         
-        if (correlationId == null || correlationId.isBlank()) {
+        if (correlationId == null || !correlationId.matches("[A-Za-z0-9._-]{1,128}")) {
             // Generate new UUID
             correlationId = UUID.randomUUID().toString();
         }

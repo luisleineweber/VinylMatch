@@ -55,6 +55,8 @@ public class SpotifySessionStore {
             }
         }
         
+        if (RedisConfig.isRequired() && RedisConfig.isAvailable()) return null;
+        RedisConfig.assertFallbackAllowed();
         return localSessions.get(sessionId);
     }
     
@@ -124,6 +126,8 @@ public class SpotifySessionStore {
             }
         }
         
+        if (RedisConfig.isRequired() && RedisConfig.isAvailable()) return null;
+        RedisConfig.assertFallbackAllowed();
         return localSessions.get(sessionId);
     }
     
@@ -155,6 +159,7 @@ public class SpotifySessionStore {
             }
         }
         
+        RedisConfig.assertFallbackAllowed();
         localSessions.put(sessionId, session);
     }
     
@@ -172,6 +177,7 @@ public class SpotifySessionStore {
             }
         }
         
+        if (!RedisConfig.isAvailable()) RedisConfig.assertFallbackAllowed();
         localSessions.remove(sessionId);
     }
 }

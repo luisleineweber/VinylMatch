@@ -139,6 +139,11 @@ class ApiServerIntegrationTest {
         assertEquals(2, json.get("results").size());
         assertNotNull(json.get("results").get(0).get("url").asText());
         assertTrue(json.get("results").get(0).get("url").asText().contains("discogs.com"));
+        assertTrue(json.get("results").get(0).hasNonNull("matchType"));
+        assertTrue(json.get("results").get(0).hasNonNull("confidence"));
+        assertTrue(json.get("results").get(0).hasNonNull("source"));
+        assertTrue(json.get("results").get(0).hasNonNull("reason"));
+        assertTrue(json.get("results").get(0).has("vinylFormatConfirmed"));
     }
 
     @Test
@@ -151,6 +156,10 @@ class ApiServerIntegrationTest {
         JsonNode json = mapper.readTree(resp.body());
         assertTrue(json.has("url"));
         assertTrue(json.get("url").asText().contains("discogs.com"));
+        assertTrue(json.hasNonNull("matchType"));
+        assertTrue(json.hasNonNull("confidence"));
+        assertTrue(json.hasNonNull("source"));
+        assertTrue(json.hasNonNull("reason"));
     }
 
     @Test

@@ -12,6 +12,7 @@ import Server.routes.DiscogsRoutes;
 import Server.routes.HealthRoutes;
 import Server.routes.PlaylistRoutes;
 import Server.session.DiscogsSessionStore;
+import Server.session.RedisConfig;
 import Server.session.SpotifySessionStore;
 import com.hctamlyniv.Config;
 import com.hctamlyniv.DiscogsService;
@@ -27,8 +28,6 @@ import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 
 /**
@@ -37,7 +36,7 @@ import java.util.concurrent.Executors;
 public class ApiServer {
 
     private static final Logger log = LoggerFactory.getLogger(ApiServer.class);
-    private static final Map<String, DiscogsService> DISCOGS_SERVICES = new ConcurrentHashMap<>();
+    private static final DiscogsServiceRegistry DISCOGS_SERVICES = new DiscogsServiceRegistry();
 
     public static HttpServer start() throws IOException {
         return start(Config.getPort());
@@ -48,6 +47,7 @@ public class ApiServer {
         int actualPort = server.getAddress().getPort();
 
         // Initialize shared components
+        RedisConfig.initialize();
         PlaylistCache playlistCache = new PlaylistCache(HttpUtils.getMapper());
         SpotifySessionStore spotifySessionStore = new SpotifySessionStore();
         DiscogsSessionStore discogsSessionStore = new DiscogsSessionStore();
@@ -80,7 +80,8 @@ public class ApiServer {
         server.createContext("/", staticHandler).getFilters().add(ApiFilters.securityHeaders());
 
         // Start server
-        server.setExecutor(Executors.newFixedThreadPool(5));
+        int requestThreads = envInt("REQUEST_THREADS", 32, 8);
+        server.setExecutor(Executors.newFixedThreadPool(requestThreads));
         server.start();
 
         URI redirectUri = spotifyOAuthService.getRedirectUri();
@@ -127,7 +128,15 @@ public class ApiServer {
         }
         final String tokenFinal = token;
         final String userAgentFinal = userAgent;
-        final String key = (tokenFinal == null ? "" : tokenFinal) + "|" + userAgentFinal;
-        return DISCOGS_SERVICES.computeIfAbsent(key, k -> new DiscogsService(tokenFinal, userAgentFinal));
+        return DISCOGS_SERVICES.get(tokenFinal, null, userAgentFinal,
+            () -> new DiscogsService(tokenFinal, userAgentFinal));
+    }
+
+    private static int envInt(String name, int fallback, int minimum) {
+        try {
+            return Math.max(minimum, Integer.parseInt(System.getenv().getOrDefault(name, Integer.toString(fallback))));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 }

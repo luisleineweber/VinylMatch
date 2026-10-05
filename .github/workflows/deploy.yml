@@ -6,12 +6,15 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build-release-artifact:
     runs-on: ubuntu-latest
+    env:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+    permissions:
+      contents: read
 
     steps:
     - name: Checkout code
@@ -24,23 +27,54 @@ jobs:
         distribution: 'temurin'
         cache: maven
 
-    - name: Run tests
-      run: mvn clean test
+    - name: Verify tag matches Maven version
+      if: startsWith(github.ref, 'refs/tags/v')
+      shell: bash
+      run: |
+        set -euo pipefail
+        project_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | tr -d '\r')
+        expected_tag="v${project_version}"
+        if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+          echo "Tag '${GITHUB_REF_NAME}' is not a supported version tag" >&2
+          exit 1
+        fi
+        if [[ "${GITHUB_REF_NAME}" != "$expected_tag" ]]; then
+          echo "Tag '${GITHUB_REF_NAME}' does not match pom.xml version '${project_version}' (expected '${expected_tag}')" >&2
+          exit 1
+        fi
 
-    - name: Build jar
-      run: mvn clean package -DskipTests
+    - name: Test, package, verify coverage, and scan dependencies
+      run: mvn -B clean verify
+
+    - name: Validate and checksum release artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -s target/VinylMatch.jar
+        jar tf target/VinylMatch.jar | grep -q '^com/hctamlyniv/Main.class$'
+        (
+          cd target
+          sha256sum VinylMatch.jar > VinylMatch.jar.sha256
+          sha256sum --check --strict VinylMatch.jar.sha256
+        )
 
     - name: Upload release artifact
       uses: actions/upload-artifact@v7
       with:
         name: VinylMatch-release-${{ github.sha }}
-        path: target/VinylMatch.jar
+        path: |
+          target/VinylMatch.jar
+          target/VinylMatch.jar.sha256
+        if-no-files-found: error
         retention-days: 14
 
   publish-github-release:
     runs-on: ubuntu-latest
     needs: build-release-artifact
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      actions: read
+      contents: write
 
     steps:
     - name: Download release artifact
@@ -48,52 +82,100 @@ jobs:
       with:
         name: VinylMatch-release-${{ github.sha }}
         path: ./release
+
+    - name: Verify downloaded artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -s release/VinylMatch.jar
+        test -s release/VinylMatch.jar.sha256
+        (cd release && sha256sum --check --strict VinylMatch.jar.sha256)
 
     - name: Publish GitHub release
       uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ github.ref_name }}
         generate_release_notes: true
-        files: ./release/VinylMatch.jar
+        files: |
+          ./release/VinylMatch.jar
+          ./release/VinylMatch.jar.sha256
 
   deploy-staging:
     runs-on: ubuntu-latest
     needs: build-release-artifact
     if: github.ref == 'refs/heads/develop'
     environment: staging
+    timeout-minutes: 15
+    concurrency:
+      group: vinylmatch-staging
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
     env:
       STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
       STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
       STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
 
     steps:
+    - name: Require staging deployment secrets
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=()
+        for name in STAGING_SSH_HOST STAGING_SSH_USER STAGING_SSH_KEY STAGING_BASE_URL; do
+          [[ -n "${!name:-}" ]] || missing+=("$name")
+        done
+        if (( ${#missing[@]} > 0 )); then
+          printf 'Missing required staging secret: %s\n' "${missing[@]}" >&2
+          exit 1
+        fi
+        [[ "$STAGING_BASE_URL" =~ ^https?:// ]] || { echo "STAGING_BASE_URL must start with http:// or https://" >&2; exit 1; }
+
+    - name: Checkout deployment scripts
+      uses: actions/checkout@v4
+
     - name: Download release artifact
       uses: actions/download-artifact@v8
       with:
         name: VinylMatch-release-${{ github.sha }}
         path: ./release
 
-    - name: Upload jar to staging host
-      if: env.STAGING_SSH_HOST != ''
+    - name: Verify downloaded artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -s release/VinylMatch.jar
+        test -s release/VinylMatch.jar.sha256
+        (cd release && sha256sum --check --strict VinylMatch.jar.sha256)
+
+    - name: Upload staged release to staging host
       uses: appleboy/scp-action@v1.0.0
       with:
         host: ${{ env.STAGING_SSH_HOST }}
         username: ${{ env.STAGING_SSH_USER }}
         key: ${{ env.STAGING_SSH_KEY }}
-        source: ./release/VinylMatch.jar
-        target: /opt/vinylmatch
+        source: ./release,./scripts/remote-deploy.sh
+        target: /tmp/vinylmatch-${{ github.sha }}
 
-    - name: Restart staging service
-      if: env.STAGING_SSH_HOST != ''
+    - name: Install and restart staging atomically
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ env.STAGING_SSH_HOST }}
         username: ${{ env.STAGING_SSH_USER }}
         key: ${{ env.STAGING_SSH_KEY }}
         script: |
-          sudo install -m 0644 /opt/vinylmatch/release/VinylMatch.jar /opt/vinylmatch/VinylMatch.jar
-          sudo systemctl restart vinylmatch-staging
-          sudo systemctl is-active --quiet vinylmatch-staging
+          bash /tmp/vinylmatch-${{ github.sha }}/scripts/remote-deploy.sh \
+            /tmp/vinylmatch-${{ github.sha }}/release \
+            /opt/vinylmatch \
+            vinylmatch-staging \
+            http://127.0.0.1:8888/api/health/simple
+
+    - name: Run staging smoke tests
+      env:
+        BASE_URL: ${{ env.STAGING_BASE_URL }}
+      run: bash scripts/smoke-tests.sh
 
   deploy-production:
     runs-on: ubuntu-latest
@@ -102,36 +184,74 @@ jobs:
     - publish-github-release
     if: startsWith(github.ref, 'refs/tags/v')
     environment: production
+    timeout-minutes: 15
+    concurrency:
+      group: vinylmatch-production
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
     env:
       PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
       PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
       PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+      PRODUCTION_BASE_URL: ${{ secrets.PRODUCTION_BASE_URL }}
 
     steps:
+    - name: Require production deployment secrets
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=()
+        for name in PRODUCTION_SSH_HOST PRODUCTION_SSH_USER PRODUCTION_SSH_KEY PRODUCTION_BASE_URL; do
+          [[ -n "${!name:-}" ]] || missing+=("$name")
+        done
+        if (( ${#missing[@]} > 0 )); then
+          printf 'Missing required production secret: %s\n' "${missing[@]}" >&2
+          exit 1
+        fi
+        [[ "$PRODUCTION_BASE_URL" =~ ^https?:// ]] || { echo "PRODUCTION_BASE_URL must start with http:// or https://" >&2; exit 1; }
+
+    - name: Checkout deployment scripts
+      uses: actions/checkout@v4
+
     - name: Download release artifact
       uses: actions/download-artifact@v8
       with:
         name: VinylMatch-release-${{ github.sha }}
         path: ./release
 
-    - name: Upload jar to production host
-      if: env.PRODUCTION_SSH_HOST != ''
+    - name: Verify downloaded artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -s release/VinylMatch.jar
+        test -s release/VinylMatch.jar.sha256
+        (cd release && sha256sum --check --strict VinylMatch.jar.sha256)
+
+    - name: Upload staged release to production host
       uses: appleboy/scp-action@v1.0.0
       with:
         host: ${{ env.PRODUCTION_SSH_HOST }}
         username: ${{ env.PRODUCTION_SSH_USER }}
         key: ${{ env.PRODUCTION_SSH_KEY }}
-        source: ./release/VinylMatch.jar
-        target: /opt/vinylmatch
+        source: ./release,./scripts/remote-deploy.sh
+        target: /tmp/vinylmatch-${{ github.sha }}
 
-    - name: Restart production service
-      if: env.PRODUCTION_SSH_HOST != ''
+    - name: Install and restart production atomically
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ env.PRODUCTION_SSH_HOST }}
         username: ${{ env.PRODUCTION_SSH_USER }}
         key: ${{ env.PRODUCTION_SSH_KEY }}
         script: |
-          sudo install -m 0644 /opt/vinylmatch/release/VinylMatch.jar /opt/vinylmatch/VinylMatch.jar
-          sudo systemctl restart vinylmatch
-          sudo systemctl is-active --quiet vinylmatch
+          bash /tmp/vinylmatch-${{ github.sha }}/scripts/remote-deploy.sh \
+            /tmp/vinylmatch-${{ github.sha }}/release \
+            /opt/vinylmatch \
+            vinylmatch \
+            http://127.0.0.1:8888/api/health/simple
+
+    - name: Run production smoke tests
+      env:
+        BASE_URL: ${{ env.PRODUCTION_BASE_URL }}
+      run: bash scripts/smoke-tests.sh

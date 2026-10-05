@@ -12,6 +12,13 @@ public interface CuratedLinkStore {
     Optional<CuratedLink> findByBarcode(String barcode);
     
     void save(CuratedLink link);
+
+    CuratedLink save(CuratedLink link, long expectedVersion, CurationAuditContext context);
+
+    List<CurationAuditEvent> history(String normalizedKey);
+
+    CuratedLink rollback(String normalizedKey, long targetVersion, long expectedVersion,
+                         CurationAuditContext context);
     
     void delete(String normalizedKey);
     

@@ -1,3 +1,67 @@
+# VinylMatch TODO - 2026-07-20 Playlist Loaded-State Clarity
+
+# VinylMatch TODO - 2026-07-20 Manual Curation Link Entry
+
+## Goal
+- Add a secondary manual Discogs-link entry path to the curation console.
+- Reuse the existing server-side validation, audit context, and optimistic version handling.
+
+## Implementation Checklist
+- [x] Add an accessible secondary manual-link form to the active curation panel.
+- [x] Reuse the existing curation save flow with client-side Discogs URL validation.
+- [x] Run frontend checks and focused syntax/tests.
+- [ ] Run the Maven test suite once the pre-existing `PlaylistAssembler`/`TrackData` compile mismatch is resolved.
+
+## Verification Notes
+- `npm run check:frontend`, `npm run test:frontend`, `node --check src/main/frontend/dist/curation.js`, and scoped `git diff --check` pass.
+- Maven is currently blocked by a pre-existing `PlaylistAssembler`/`TrackData` constructor mismatch; no unrelated backend code was changed for this slice.
+- The worktree contains unrelated pre-existing changes; only the curation files and task notes are in scope for this slice.
+
+---
+
+## Goal
+- Make the playlist page clearly communicate that Spotify data loaded successfully before Discogs match review finishes.
+- Keep low-confidence and legacy Discogs matches honest while replacing vague repeated review copy.
+- Verify the active frontend assets and project build.
+
+## Implementation Checklist
+- [x] Trace playlist loading, Discogs enrichment, and current match badge behavior.
+- [x] Add explicit loaded-state presentation and clearer review copy.
+- [x] Run focused frontend checks and the Maven test suite.
+
+## Verification Notes
+- Baseline `mvn test` passed before this slice; the worktree contains unrelated pre-existing changes.
+- `node --check src/main/frontend/dist/playlist.js` passed.
+- `node --check src/main/frontend/dist/playlist/track-renderer.js` passed.
+- `mvn '-Dtest=Server.FrontendMatchRenderingTest' test` passed after sequential Maven compilation.
+- `mvn test` passed after the final frontend adjustment.
+- `mvn clean test` could not run because the active `java -jar target/VinylMatch.jar` process locks the JAR; no source/test failure was involved.
+
+---
+
+# VinylMatch TODO - 2026-07-20 Match-Evidenz und Info-Disclosure
+
+## Goal
+- Verstecke wiederholte Discogs-Provenance-Texte hinter einem kleinen zugänglichen Info-i.
+- Reiche echte `DiscogsMatch`-Evidenz im initialen Playlist-Payload durch und verhindere, dass alte Legacy-Cache-URLs dauerhaft als `LOW` gelten, wenn ein Discogs-API-Zugriff verfügbar ist.
+- Bewahre bestehende uncommitted Änderungen außerhalb dieses Scopes und verifiziere Frontend/Backend gemeinsam.
+
+## Implementation Checklist
+- [x] TrackData/PlaylistAssembler um `DiscogsMatch`-Weitergabe ergänzen.
+- [x] Legacy-Cache-Treffer bei konfigurierter Discogs-API zur erneuten Suche freigeben.
+- [x] Renderer auf Info-Disclosure mit ARIA-Zustand und List/Grid-kompatible Styles umstellen.
+- [x] Regressionstests und Syntax-/Diff-/Maven-Prüfungen ausführen.
+
+## Verification Notes
+- `Server.TrackData` serialisiert nun das optionale `discogsMatch`; `PlaylistAssembler` übergibt den Cache-Match samt URL im initialen Payload.
+- `DiscogsService` behandelt `LEGACY_CACHE` bei konfigurierter API nicht mehr als final; tokenlose `SEARCH_ONLY / LOW`-Fallbacks bleiben unverändert.
+- Match-Evidence ist in `track-renderer.js` standardmäßig verborgen und über `.match-evidence-toggle` mit `aria-expanded`/`aria-controls` bedienbar; List/Grid sowie Variant 4 verwenden den normalen Dokumentfluss.
+- Fokusierte Maven-Tests: 9 Tests erfolgreich; vollständige Suite: 135 Tests erfolgreich, 0 Fehler.
+- Frontend-Unit-Tests: 7 erfolgreich; vollständige E2E-Suite: 4 erfolgreich; `node --check` für Renderer/Discogs-State erfolgreich; `git diff --check` erfolgreich.
+- `npm run check:frontend` bleibt wegen der bereits untracked `src/main/frontend/dist/theme-bootstrap.js`-Referenzen rot; diese bestehende Asset-Graph-Anomalie lag außerhalb des Match-Scopes und wurde nicht überschrieben.
+
+---
+
 # VinylMatch TODO - 2026-05-15 Dependabot PR Merge Pass
 
 ## Goal
@@ -1210,3 +1274,172 @@ Reduce maintenance noise in `home.css` by removing repetitive `:root[data-home-v
 - Proof of work:
   - `git diff --check -- src/main/frontend/styles/playlist-variant4.css tasks/todo.md tasks/lessons.md`
   - `Get-Content src/main/frontend/styles/playlist-variant4.css | Select-Object -Skip 832 -First 28`
+
+---
+
+# VinylMatch TODO - 2026-07-17 Product Review Roadmap
+
+## Goal
+- Convert `docs/full-prod-review-17-07-26.md` into a single offline HTML roadmap that distinguishes confirmed current errors from fixed, partial, and unconfirmed findings.
+- Give every finding a priority, concrete source, first fix direction, dependencies, and acceptance criteria for later implementation slices.
+- Keep this slice documentation-only; do not change product code, CI, deployment, or dependencies.
+
+## Implementation Checklist
+- [x] Create `docs/full-prod-roadmap-17-07-26.html` with the complete review inventory.
+- [x] Add inline styling, filters/search, status counters, local todo checkboxes, accessibility hooks, and print layout.
+- [x] Verify offline loading, absence of external resources, content coverage, and clean diff.
+- [x] Record verification evidence and final changed-file scope.
+
+## Verification Notes
+- Created `docs/full-prod-roadmap-17-07-26.html` as a standalone German offline roadmap with 33 review entries, status badges, P0–P3 priorities, sources, first fix directions, dependencies, acceptance criteria, filters, search, local checkbox persistence, keyboard shortcut, and print styling.
+- Confirmed 33 `review-item` entries and 33 matching local todo checkboxes; required review IDs and status categories are present.
+- Inline JavaScript syntax check passed via `vm.Script`; no external `<script src>`, `<link href>`, iframe, `@import`, or CSS `url()` resource references were found.
+- `git diff --check -- .gitignore tasks/todo.md` and an untracked-file diff check for the new HTML passed.
+- Added a focused `.gitignore` exception because the repository ignores `docs/*`; the new roadmap is now visible as an untracked deliverable without unignoring unrelated documentation.
+- Final intended scope: `.gitignore`, `tasks/todo.md`, and `docs/full-prod-roadmap-17-07-26.html`; no product source, CI workflow, dependency, or deployment logic changed.
+
+---
+
+# VinylMatch TODO - 2026-07-17 P0 Production Roadmap Implementation
+
+## Goal
+- Implement all 19 P0 items from `docs/full-prod-roadmap-17-07-26.html` without changing the custom-server architecture or moving third-party API calls into the browser.
+- Preserve the existing green Java baseline while adding focused tests and executable CI/deploy guardrails.
+- Update the roadmap only after each acceptance criterion has verifiable evidence.
+
+## Baseline
+- [x] Read repo instructions and lessons, inventory all P0 items, inspect the dirty worktree, and run the existing test suite.
+- [x] Confirm `mvn test`: 115 tests, 0 failures/errors, JaCoCo checks met.
+
+## Implementation Checklist
+- [ ] FE-02: choose and enforce one reproducible frontend source/build model; remove stale build remnants.
+- [ ] FE-01: remove active mojibake and verify UTF-8 source/packaged/browser output.
+- [ ] FE-03: add a tracked static-asset/relative-ESM resolver and CI gate that ignores untracked workspace files.
+- [ ] MATCH-01: expose backend match provenance, confidence, reason, and reviewability; stop inferring direct matches from URLs.
+- [ ] AUTH-01: surface every terminal Spotify OAuth/popup/session/callback failure beside the login action with recovery guidance.
+- [ ] BE-05: make required Redis availability explicit and fail-safe in production while retaining a convenient development fallback.
+- [ ] BE-04: separate liveness, readiness, and dependency health without blocking core request threads.
+- [ ] SEC-02: trust forwarded client/proto headers only from configured proxies and cover direct/proxied requests.
+- [ ] SEC-03: bound rate-limit state, support a shared Redis limiter in production, and document response/retry semantics.
+- [ ] BE-02: bound the playlist cache in memory/on disk and sweep expired entries independently of reads.
+- [ ] BE-03: add TTL/eviction to Discogs service maps and verify token rotation/invalidation.
+- [ ] BE-01: separate inbound request capacity from bounded provider work, expose saturation, and keep health/auth responsive.
+- [ ] SEC-01: remove unnecessary `unsafe-inline` CSP execution and verify the core browser flow.
+- [ ] CUR-02: add actor/version/history/conflict protection and undo for curated links.
+- [ ] OBS-01: make error-tracking claims truthful and retain correlation IDs without leaking secrets.
+- [ ] CI-03: run Dependency-Check in CI `verify`, document its threshold/fallback, and retain reports.
+- [ ] CI-02: align JaCoCo report/gate scope, cover or justify critical exclusions, and publish coverage artifacts.
+- [ ] CI-01: add clean frontend, browser, smoke, and controlled scheduled load gates with useful artifacts.
+- [ ] DEP-01: fail missing deploy prerequisites, validate tag/POM/artifact identity, and run post-deploy health/smoke checks.
+
+## Final Verification
+- [ ] Run focused Java/JS/workflow checks after each slice and the full Maven suite at the end.
+- [ ] Run the `code-review` skill against the completed work and resolve actionable findings.
+- [ ] Update all 19 P0 roadmap entries and record exact proof of work here.
+
+---
+
+# VinylMatch TODO - 2026-07-20 Spotify OAuth Callback Popup Design
+
+## Goal
+- Replace the browser-default-looking Spotify OAuth callback popup with a real VinylMatch Variant-4 styled success/error card.
+- Keep strict CSP intact by removing inline CSS/JavaScript from the server-rendered callback.
+- Preserve HTML escaping, same-origin `postMessage`, automatic close, and navigation fallback behavior.
+
+## Implementation Checklist
+- [x] Extract callback CSS and JavaScript into same-origin frontend assets.
+- [x] Update `AuthRoutes.sendCallbackHtml` with semantic, accessible markup and external asset references.
+- [x] Add focused assertions/tests for the CSP-compatible HTML contract and callback module behavior.
+- [x] Run frontend syntax/tests, focused Maven tests, browser verification, and `git diff --check`.
+
+## Acceptance Criteria
+- Callback response visibly renders a branded responsive card under the existing strict CSP.
+- No inline `<style>` or executable inline `<script>` remains in the callback response.
+- Success and error flows still post structured same-origin messages and close/navigate as before.
+
+## Verification Notes
+- `src/main/java/Server/routes/AuthRoutes.java` now serves semantic callback markup with external `/styles/spotify-callback.css` and `/dist/spotify-callback.js`, `Cache-Control: no-store`, and escaped dynamic values.
+- Added `src/main/frontend/styles/spotify-callback.css` with responsive Variant-4 styling, dark-mode support, focus-visible treatment, and reduced-motion handling.
+- Added `src/main/frontend/dist/spotify-callback.js` with same-origin payload posting, popup close/navigation fallback, and testable exports.
+- Added Java assertions in `src/test/java/Server/routes/AuthRoutesTest.java` and six passing frontend tests in `src/test/frontend/spotify-callback.test.mjs`.
+- Browser proof on `http://127.0.0.1:8893/api/auth/callback?error=access_denied`: HTTP 200, CSS/JS assets HTTP 200, strict CSP without `unsafe-inline`, no console/request errors, computed heading font `Archivo Black`, screenshot `tasks/spotify-callback-check.png`.
+- `npm run test:frontend`, `node --check src/main/frontend/dist/spotify-callback.js`, focused `AuthRoutesTest`, and `git diff --check` passed. `npm run check:frontend` remains blocked by the pre-existing untracked `src/main/frontend/dist/theme-bootstrap.js` references in multiple existing HTML files.
+- Dynamic callback values remain HTML-escaped in attributes and visible text.
+
+---
+
+# VinylMatch TODO - 2026-07-20 Direct Discogs Match Source Label
+
+## Goal
+- Treat a server-confirmed direct Discogs catalog match as a verified Discogs source in the playlist UI.
+- Keep genuinely unknown or legacy client match sources labeled as unverified.
+
+## Implementation Checklist
+- [ ] Add a focused regression assertion for the `DISCOGS_CATALOG` source label.
+- [ ] Update the playlist match-source formatter without changing match confidence or URL provenance.
+- [ ] Run focused frontend/Java checks and the Maven test suite.
+- [ ] Record the bug lesson and verification evidence.
+
+## Acceptance Criteria
+- A direct match with source `DISCOGS_CATALOG` is displayed as a Discogs match, not “Unverified source.”
+- Unknown source values continue to display as “Unverified source.”
+
+---
+
+# VinylMatch TODO - 2026-07-20 Loading Timeout Error
+
+## Goal
+- Ensure stalled playlist requests stop showing a loading state after a reasonable deadline.
+- Show an actionable inline error while preserving existing API error handling and server-side integrations.
+
+## Implementation Checklist
+- [x] Add a shared 30-second browser request timeout with a clear timeout error.
+- [x] Apply it to homepage playlist opens, playlist-page loads, and curation playlist loads.
+- [x] Add focused frontend regression coverage and run syntax/tests plus diff checks.
+- [x] Record the bug lesson and verification evidence.
+
+## Acceptance Criteria
+- A request that never settles aborts after 30 seconds.
+- The loading overlay is cleared and the relevant page shows an inline error explaining that the request timed out.
+- Non-timeout HTTP/API errors retain their current messages.
+
+# VinylMatch TODO - 2026-08-14 Spotify Currently Playing Token
+
+## Goal
+- Request `user-read-currently-playing` during the existing Spotify OAuth flow.
+- Keep token issuance server-side and avoid committing access or refresh tokens.
+- Verify the authorization URL includes the new scope before asking the user to authorize.
+
+## Implementation Checklist
+- [x] Add `user-read-currently-playing` to the server-side Spotify OAuth scopes.
+- [x] Add a regression assertion for the generated authorization URL.
+- [x] Complete the Spotify account consent flow and confirm the resulting session is logged in.
+
+## Verification Notes
+- `Server.auth.SpotifyOAuthServiceTest`: 4 tests passed.
+- Local packaged build succeeded with `scripts/build.ps1`.
+- `POST /api/auth/login` returned an authorization URL containing `user-read-currently-playing`.
+- The local server is running at `http://127.0.0.1:8888`; account consent is still required before a user token exists.
+
+## Completion Notes
+- User confirmed the access/refresh token export succeeded for the second project.
+- The temporary local export route was removed immediately afterward; the rebuilt server returns 404 for `/api/auth/export-token`.
+
+---
+
+# VinylMatch TODO - 2026-08-15 One-Time Local Spotify Token Export
+
+## Goal
+- Allow the already-authorized local VinylMatch session to export its access and refresh tokens for a second local project.
+- Never log or commit token values, and refuse the export outside local development requests.
+- Remove the temporary export route immediately after the user retrieves the credentials.
+
+## Implementation Checklist
+- [x] Add a loopback-only, development-only token export route with focused tests.
+- [x] Build and start the updated local app.
+- [x] Have the user open the export route in the authorized browser session and retrieve the local response.
+- [x] Remove the temporary route and re-run focused tests.
+
+## Verification Notes
+- The one-time route returned the token pair only through the authorized local browser session; token values were not logged or committed.
+- The export route and its tests have now been removed from the application.

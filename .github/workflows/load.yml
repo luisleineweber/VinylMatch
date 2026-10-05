@@ -1,0 +1,41 @@
+name: Controlled load smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  local-health-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: mvn -B -DskipTests package
+      - name: Start built application
+        run: |
+          ENVIRONMENT=development PORT=8888 java -jar target/VinylMatch.jar > target/load-server.log 2>&1 &
+          echo $! > target/load-server.pid
+          for attempt in {1..30}; do curl -fsS http://127.0.0.1:8888/api/health/simple && exit 0; sleep 1; done
+          exit 1
+      - name: Run bounded load smoke
+        run: node scripts/load-smoke.mjs | tee target/load-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: controlled-load-results
+          path: |
+            target/load-results.json
+            target/load-server.log

@@ -8,6 +8,7 @@ import Server.cache.PlaylistCache;
 import Server.cache.PlaylistCacheKey;
 import Server.http.ApiFilters;
 import Server.http.HttpUtils;
+import Server.http.ProviderExecutor;
 import com.hctamlyniv.DiscogsService;
 import com.hctamlyniv.ReceivingData;
 import com.sun.net.httpserver.HttpExchange;
@@ -122,7 +123,11 @@ public class PlaylistRoutes {
             PlaylistData playlistData = playlistCache.lookup(cacheKey);
             if (playlistData == null) {
                 ReceivingData rd = new ReceivingData(token, id, discogsService);
-                ReceivingData.PlaylistLoadResult loadResult = rd.loadPlaylistDataResult(offset, limit);
+                int requestedOffset = offset;
+                int requestedLimit = limit;
+                ReceivingData.PlaylistLoadResult loadResult = ProviderExecutor.call(
+                    () -> rd.loadPlaylistDataResult(requestedOffset, requestedLimit)
+                );
                 playlistData = loadResult.playlistData();
                 if (playlistData == null) {
                     playlistCache.remove(cacheKey);
@@ -144,6 +149,9 @@ public class PlaylistRoutes {
             }
 
             HttpUtils.sendJson(exchange, 200, playlistData);
+        } catch (ProviderExecutor.ProviderUnavailableException e) {
+            if (cacheKey != null) playlistCache.remove(cacheKey);
+            HttpUtils.sendApiError(exchange, 503, "provider_busy", "Spotify is busy or timed out; retry shortly");
         } catch (Exception e) {
             if (cacheKey != null) {
                 playlistCache.remove(cacheKey);
@@ -198,11 +206,13 @@ public class PlaylistRoutes {
             }
 
             SpotifyApi spotifyApi = new SpotifyApi.Builder().setAccessToken(token).build();
-            Paging<PlaylistSimplified> page = spotifyApi.getListOfCurrentUsersPlaylists()
-                    .offset(offset)
-                    .limit(limit)
-                    .build()
-                    .execute();
+            int requestedOffset = offset;
+            int requestedLimit = limit;
+            Paging<PlaylistSimplified> page = ProviderExecutor.call(() -> spotifyApi.getListOfCurrentUsersPlaylists()
+                .offset(requestedOffset)
+                .limit(requestedLimit)
+                .build()
+                .execute());
 
             PlaylistSimplified[] items = page.getItems();
             List<PlaylistSummary> summaries = new ArrayList<>();
@@ -227,6 +237,8 @@ public class PlaylistRoutes {
             int total = page.getTotal();
             UserPlaylistsResponse payload = new UserPlaylistsResponse(summaries, total, offset, limit);
             HttpUtils.sendJson(exchange, 200, payload);
+        } catch (ProviderExecutor.ProviderUnavailableException e) {
+            HttpUtils.sendApiError(exchange, 503, "provider_busy", "Spotify is busy or timed out; retry shortly");
         } catch (SpotifyWebApiException e) {
             log.warn("Spotify API error: {}", e.getMessage());
             HttpUtils.sendApiError(exchange, 502, "spotify_api_error", "Spotify API error");

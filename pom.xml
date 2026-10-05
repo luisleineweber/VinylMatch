@@ -12,6 +12,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jacoco.coverage.minimum>0.50</jacoco.coverage.minimum>
     </properties>
 
     <dependencies>
@@ -127,36 +128,18 @@
                     </execution>
                     <execution>
                         <id>report</id>
-                        <phase>test</phase>
+                        <phase>verify</phase>
                         <goals>
                             <goal>report</goal>
                         </goals>
-                        <configuration>
-                            <!-- Exclude external-integration code from coverage reporting/checks -->
-                            <excludes>
-                                <exclude>com/hctamlyniv/spotify/*</exclude>
-                                <exclude>com/hctamlyniv/ReceivingData*</exclude>
-                                <exclude>com/hctamlyniv/curation/*</exclude>
-                                <exclude>Server/routes/PlaylistRoutes*</exclude>
-                                <exclude>Server/http/filters/AdminOnlyFilter*</exclude>
-                            </excludes>
-                        </configuration>
                     </execution>
                     <execution>
                         <id>check</id>
-                        <phase>test</phase>
+                        <phase>verify</phase>
                         <goals>
                             <goal>check</goal>
                         </goals>
                         <configuration>
-                            <!-- Exclude external-integration code from coverage reporting/checks -->
-                            <excludes>
-                                <exclude>com/hctamlyniv/spotify/*</exclude>
-                                <exclude>com/hctamlyniv/ReceivingData*</exclude>
-                                <exclude>com/hctamlyniv/curation/*</exclude>
-                                <exclude>Server/routes/PlaylistRoutes*</exclude>
-                                <exclude>Server/http/filters/AdminOnlyFilter*</exclude>
-                            </excludes>
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
@@ -164,7 +147,7 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.40</minimum>
+                                            <minimum>${jacoco.coverage.minimum}</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
@@ -203,6 +186,7 @@
                 <version>12.2.1</version>
                 <configuration>
                     <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                    <!-- Feed/network failures are transient; confirmed CVSS 7+ findings still fail via failBuildOnCVSS. -->
                     <failOnError>false</failOnError>
                     <failBuildOnCVSS>7</failBuildOnCVSS>
                     <suppressionFiles>
@@ -215,6 +199,8 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>dependency-vulnerability-check</id>
+                        <phase>verify</phase>
                         <goals>
                             <goal>check</goal>
                         </goals>

@@ -1,20 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-home-variant="6">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VinylMatch - Home</title>
 
-  <script>
-    (() => {
-      try {
-        const theme = localStorage.getItem("vinylmatch_theme");
-        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-      } catch (_) {}
-
-      document.documentElement.dataset.homeVariant = "6";
-    })();
-  </script>
+  <script src="/dist/theme-bootstrap.js"></script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -105,7 +96,7 @@
         <img class="hero-logo-svg logo-light" src="/design/logo-black.svg" alt="VinylMatch" aria-hidden="true" />
         <img class="hero-logo-svg logo-dark" src="/design/logo-white.svg" alt="VinylMatch" aria-hidden="true" />
         <!-- Fallback PNG -->
-        <img class="hero-logo" src="/design/VM_Logo.png" alt="VinylMatch" width="900" height="600" fetchpriority="high" decoding="async" onerror="this.style.display='none'" />
+        <img class="hero-logo" src="/design/VM_Logo.png" alt="VinylMatch" width="900" height="600" fetchpriority="high" decoding="async" />
         <p class="hero-variant-label" id="variant-label">Design 1 - Split Stage</p>
       </div>
       <div class="hero-content">
@@ -146,21 +137,6 @@
   </main>
 </div>
 
-  <script>
-    // Update variant label based on current design
-    (() => {
-      const labels = {
-        "3": "Design 3 - Archive Column",
-        "4": "Design 4 - Brutalist Raw",
-        "6": "Design 6 - Editorial Magazine"
-      };
-      const variant = document.documentElement.dataset.homeVariant || "1";
-      const labelEl = document.getElementById('variant-label');
-      if (labelEl && labels[variant]) {
-        labelEl.textContent = labels[variant];
-      }
-    })();
-  </script>
   <script type="module" src="/dist/main.js"></script>
 </body>
 </html>
