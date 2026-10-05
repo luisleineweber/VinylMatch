@@ -116,7 +116,7 @@
     margin-top: 1rem;
 }
 
-.qs-button:disabled {
+.qs-button[aria-disabled="true"] {
     cursor: wait;
     opacity: 0.65;
 }
@@ -143,4 +143,3 @@
     background: var(--accent-soft);
     font-weight: 650;
 }
-

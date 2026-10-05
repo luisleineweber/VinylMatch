@@ -10,6 +10,10 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -17,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DiscogsCatalogTest {
     private HttpServer server;
+    private ExecutorService executor;
     private DiscogsCatalog catalog;
     private final AtomicReference<String> query = new AtomicReference<>();
     private final AtomicReference<String> body = new AtomicReference<>();
@@ -25,6 +30,8 @@ class DiscogsCatalogTest {
     @BeforeEach
     void setup() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        executor = Executors.newVirtualThreadPerTaskExecutor();
+        server.setExecutor(executor);
         server.createContext("/", exchange -> {
             query.set(exchange.getRequestURI().getRawQuery());
             assertEquals("Discogs token=test", exchange.getRequestHeaders().getFirst("Authorization"));
@@ -38,6 +45,7 @@ class DiscogsCatalogTest {
     @AfterEach
     void teardown() {
         server.stop(0);
+        executor.close();
     }
 
     @Test
@@ -60,14 +68,14 @@ class DiscogsCatalogTest {
         assertEquals("Artist", first.artist());
         assertNull(result.data().items().get(1).image());
         assertEquals("https://www.discogs.com/master/1", first.url());
-        assertTrue(query.get().contains("q=Artist+%26+Album&type=master"));
+        assertTrue(query.get().contains("q=Artist+%26+Album&type=release"));
     }
 
     @Test
     void songSearchUsesTrackFilterAndKeepsSongContext() throws Exception {
         body.set("{\"results\":[{\"id\":7,\"type\":\"master\",\"title\":\"Daft Punk - Discovery\"}]}");
         var result = catalog.search("One More Time", "songs");
-        assertTrue(query.get().contains("track=One+More+Time&type=master"));
+        assertTrue(query.get().contains("track=One+More+Time&type=release"));
         assertFalse(query.get().contains("q="));
         assertEquals("One More Time", result.data().items().getFirst().songQuery());
     }
@@ -167,6 +175,105 @@ class DiscogsCatalogTest {
         assertThrows(java.io.IOException.class, () -> catalog.search("Album", "albums"));
         assertThrows(java.io.IOException.class, () -> catalog.artist(4, 1));
         assertThrows(java.io.IOException.class, () -> catalog.album(7, "master"));
+    }
+
+    @Test
+    void albumAndSongSearchesIncludeReleasesWithoutMasters() throws Exception {
+        server.removeContext("/");
+        server.createContext("/", exchange -> respond(exchange, 200,
+                exchange.getRequestURI().getRawQuery().contains("type=master")
+                        ? "{\"results\":[]}"
+                        : "{\"results\":[{\"id\":77,\"type\":\"release\",\"title\":\"Artist - Standalone\"}]}"));
+        for (String type : new String[]{"albums", "songs"}) {
+            var items = catalog.search("Standalone", type).data().items();
+            assertEquals(1, items.size(), type);
+            assertEquals("release", items.getFirst().kind());
+            assertEquals(77, items.getFirst().id());
+        }
+    }
+
+    @Test
+    void allSearchKeepsSongContextWhenBothSearchesFindTheSameAlbum() throws Exception {
+        body.set("{\"results\":[{\"id\":7,\"type\":\"master\",\"title\":\"Artist - Same Song\"}]}");
+        var items = catalog.search("Same Song", "all").data().items();
+        assertEquals(1, items.size());
+        assertEquals("Same Song", items.getFirst().songQuery());
+    }
+
+    @Test
+    void allSearchKeepsSongContextForDuplicatesBeyondTheResultLimit() throws Exception {
+        StringBuilder direct = new StringBuilder("{\"results\":[");
+        StringBuilder songs = new StringBuilder("{\"results\":[");
+        for (int i = 1; i <= 20; i++) {
+            if (i > 1) { direct.append(','); songs.append(','); }
+            direct.append("{\"id\":").append(i).append(",\"type\":\"master\",\"title\":\"Artist - Album\"}");
+            songs.append("{\"id\":").append(i == 20 ? 1 : i + 1)
+                    .append(",\"type\":\"master\",\"title\":\"Artist - Album\"}");
+        }
+        String directBody = direct.append("]}").toString();
+        String songBody = songs.append("]}").toString();
+        server.removeContext("/");
+        server.createContext("/", exchange -> respond(exchange, 200,
+                exchange.getRequestURI().getRawQuery().contains("track=") ? songBody : directBody));
+        var items = catalog.search("Song", "all").data().items();
+        assertEquals(20, items.size());
+        assertEquals(1, items.getFirst().id());
+        assertTrue(items.stream().allMatch(item -> "Song".equals(item.songQuery())));
+    }
+
+    @Test
+    void allSearchStartsBothRequestsBeforeEitherCompletes() throws Exception {
+        var started = new CountDownLatch(2);
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            started.countDown();
+            try {
+                respond(exchange, started.await(2, TimeUnit.SECONDS) ? 200 : 503, "{\"results\":[]}");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                exchange.close();
+            }
+        });
+        assertEquals(200, catalog.search("Album", "all").status());
+        assertEquals(0, started.getCount());
+    }
+
+    @Test
+    void artistPagesReuseTheProfileButFetchEachRequestedPage() throws Exception {
+        var profiles = new AtomicInteger();
+        var pages = new AtomicInteger();
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("/releases")) {
+                pages.incrementAndGet();
+                respond(exchange, 200, "{\"pagination\":{\"pages\":3},\"releases\":[]}");
+            } else {
+                profiles.incrementAndGet();
+                respond(exchange, 200, "{\"name\":\"Artist\"}");
+            }
+        });
+        assertEquals(1, catalog.artist(4, 1).data().page());
+        assertEquals(2, catalog.artist(4, 2).data().page());
+        assertEquals(1, profiles.get());
+        assertEquals(2, pages.get());
+    }
+
+    @Test
+    void artistProfileFailuresAreNotCached() throws Exception {
+        var profiles = new AtomicInteger();
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("/releases")) {
+                respond(exchange, 200, "{\"releases\":[]}");
+            } else {
+                int attempt = profiles.incrementAndGet();
+                respond(exchange, attempt == 1 ? 429 : 200, "{\"name\":\"Artist\"}");
+            }
+        });
+        assertEquals(429, catalog.artist(4, 1).status());
+        assertEquals(200, catalog.artist(4, 1).status());
+        assertEquals(200, catalog.artist(4, 2).status());
+        assertEquals(2, profiles.get());
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws java.io.IOException {

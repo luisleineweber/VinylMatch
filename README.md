@@ -42,6 +42,8 @@ Small windows show fewer rows so the search field and close button remain in vie
 Select an album to see its track list, Discogs offer count and shop links. Select an artist to browse
 their main releases, including albums, EPs and singles. Use **Load more releases** to browse all pages.
 Song searches show releases that contain the song. All views stay in the popup, and Back restores the result list.
+Albums and Songs include releases without a master. Editions with a master are grouped into one result.
+Album details load while custom shop settings load. Artist profiles stay in memory for one minute when browsing release pages.
 
 Quicksearch needs `DISCOGS_TOKEN` or a connected Discogs session. Users can connect Discogs on the Playlist page.
 Spotify login is not required for Quicksearch. Discogs offer counts include all formats; marketplace links filter for vinyl.
@@ -88,6 +90,16 @@ mvn package
 ```
 
 The frontend is served as static files from `src/main/frontend/`.
+
+To run the Quicksearch browser tests with Node.js:
+
+```bash
+node scripts/test-frontend.mjs
+```
+
+Open `http://127.0.0.1:8782/tests/quicksearch.html`. The page runs tests with controlled API responses
+and shows each result. It checks retry, Back, loading more, late responses, and slow or failed shop settings.
+These tests do not need Spotify or Discogs credentials.
 
 Windows (PowerShell, with bundled Maven):
 

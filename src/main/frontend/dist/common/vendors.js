@@ -152,7 +152,7 @@ export function buildAllVendorLinks(track) {
 
 /**
  * Loads custom vendor configuration from the backend.
- * Falls back silently if endpoint is unavailable.
+ * Returns whether custom settings were loaded.
  */
 export async function loadCustomVendors() {
     try {
@@ -160,15 +160,21 @@ export async function loadCustomVendors() {
             cache: "no-cache",
             credentials: "include"
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+            console.warn("[Vendors] Could not load custom settings:", response.status);
+            return false;
+        }
         
         const data = await response.json();
-        if (Array.isArray(data?.vendors)) {
-            setVendors(data.vendors);
-            console.info("[Vendors] Loaded custom vendors:", data.vendors.length);
+        if (!Array.isArray(data?.vendors)) {
+            console.error("[Vendors] Invalid custom settings response");
+            return false;
         }
+        setVendors(data.vendors);
+        return true;
     } catch (e) {
-        // Silently fail - custom vendors are optional
+        console.error("[Vendors] Could not load custom settings", e);
+        return false;
     }
 }
 

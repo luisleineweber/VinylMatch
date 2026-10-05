@@ -72,7 +72,7 @@ export function renderMessage(container, title, message, retry) {
     container.replaceChildren(panel);
 }
 
-export function renderArtist(container, artist, select, loadMore, loadingMore = false) {
+export function renderArtist(container, artist, select, loadMore) {
     const heading = element("div", "qs-detail-heading");
     const copy = element("div");
     const title = element("h3", "", artist.name);
@@ -87,9 +87,8 @@ export function renderArtist(container, artist, select, loadMore, loadingMore = 
     container.append(element("h4", "qs-section-title", "Releases"), albums);
     if (!artist.albums.length) container.append(element("p", "qs-description", "No main releases on this page."));
     if (artist.page < artist.pages) {
-        const more = element("button", "qs-button qs-load-more", loadingMore ? "Loading releases…" : "Load more releases");
+        const more = element("button", "qs-button qs-load-more", "Load more releases");
         more.type = "button";
-        more.disabled = loadingMore;
         more.addEventListener("click", loadMore);
         container.append(more);
     }
@@ -106,6 +105,7 @@ export function renderAlbum(container, album, openArtist, songQuery) {
     for (const artist of album.artists) {
         const button = element("button", "qs-text-button", artist.name);
         button.type = "button";
+        button.dataset.key = `artist:${artist.id}`;
         button.addEventListener("click", () => openArtist({ id: artist.id, kind: "artist", title: artist.name }));
         artists.append(button);
     }
@@ -117,27 +117,7 @@ export function renderAlbum(container, album, openArtist, songQuery) {
     if (link) container.append(link);
     container.append(element("h4", "qs-section-title", "Find this record"));
     const providers = element("ul", "qs-providers");
-    const discogs = element("li", "qs-provider");
-    const detail = element("div");
-    detail.append(element("strong", "", "Discogs"));
-    let status = "Offer count unavailable";
-    if (album.offers === 0) status = "No current offers";
-    if (album.offers > 0) status = `${album.offers} offers · all formats`;
-    detail.append(element("p", "qs-description", status));
-    discogs.append(detail);
-    const marketplace = externalLink("Check vinyl offers ↗", album.marketplaceUrl, "qs-button");
-    if (marketplace) discogs.append(marketplace);
-    providers.append(discogs);
-    for (const { vendor, url } of buildAllVendorLinks({ artist: album.artist, album: album.title, releaseYear: album.year })) {
-        const link = externalLink("Search shop ↗", url, "qs-button");
-        if (!link) continue;
-        link.setAttribute("aria-label", `Search shop: ${vendor.name}, ${album.title}, opens in a new tab`);
-        const row = element("li", "qs-provider");
-        const detail = element("div");
-        detail.append(element("strong", "", vendor.name), element("p", "qs-description", "Stock not checked"));
-        row.append(detail, link);
-        providers.append(row);
-    }
+    renderProviders(providers, album);
     container.append(providers, element("p", "qs-description qs-provider-note", "Discogs counts include all formats. Shop links open a search. Check the edition and stock with the seller."));
     if (album.vinyl === false) container.append(element("p", "qs-description", "This edition is not vinyl. Check Discogs for a vinyl edition."));
     if (album.tracks.length) {
@@ -153,4 +133,32 @@ export function renderAlbum(container, album, openArtist, songQuery) {
         container.append(tracks);
     }
     return title;
+}
+
+export function renderProviders(providers, album) {
+    const discogs = element("li", "qs-provider");
+    const detail = element("div");
+    detail.append(element("strong", "", "Discogs"));
+    let status = "Offer count unavailable";
+    if (album.offers === 0) status = "No current offers";
+    if (album.offers > 0) status = `${album.offers} offers · all formats`;
+    detail.append(element("p", "qs-description", status));
+    discogs.append(detail);
+    const marketplace = externalLink("Check vinyl offers ↗", album.marketplaceUrl, "qs-button");
+    if (marketplace) {
+        marketplace.dataset.key = "marketplace";
+        discogs.append(marketplace);
+    }
+    providers.replaceChildren(discogs);
+    for (const { vendor, url } of buildAllVendorLinks({ artist: album.artist, album: album.title, releaseYear: album.year })) {
+        const link = externalLink("Search shop ↗", url, "qs-button");
+        if (!link) continue;
+        link.dataset.key = `shop:${vendor.id}`;
+        link.setAttribute("aria-label", `Search shop: ${vendor.name}, ${album.title}, opens in a new tab`);
+        const row = element("li", "qs-provider");
+        const detail = element("div");
+        detail.append(element("strong", "", vendor.name), element("p", "qs-description", "Stock not checked"));
+        row.append(detail, link);
+        providers.append(row);
+    }
 }

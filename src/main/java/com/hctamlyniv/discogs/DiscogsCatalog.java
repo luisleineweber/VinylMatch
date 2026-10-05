@@ -16,9 +16,12 @@ import java.util.List;
 import java.util.Map;
 
 public final class DiscogsCatalog {
+    private static final long CACHE_TTL_NANOS = 60_000_000_000L;
+    private static final int CACHE_LIMIT = 64;
     private final DiscogsApiClient api;
-    private final Map<String, CachedSearch> searches = new LinkedHashMap<>();
-    private record CachedSearch(long time, Search data) {}
+    private final Map<String, Cached<Search>> searches = new LinkedHashMap<>();
+    private final Map<Integer, Cached<JsonNode>> profiles = new LinkedHashMap<>();
+    private record Cached<T>(long time, T data) {}
 
     public DiscogsCatalog(DiscogsApiClient api) {
         this.api = api;
@@ -26,53 +29,81 @@ public final class DiscogsCatalog {
 
     public CatalogResult<Search> search(String query, String type) throws IOException, InterruptedException {
         String key = type + ":" + query;
-        synchronized (searches) {
-            var cached = searches.get(key);
-            if (cached != null && System.nanoTime() - cached.time() < 60_000_000_000L) {
-                return CatalogResult.success(cached.data());
-            }
-        }
+        var cached = cached(searches, key);
+        if (cached != null) return CatalogResult.success(cached);
         String encoded = DiscogsUrlUtils.urlEncode(query);
         String filter = switch (type) {
             case "artists" -> "q=" + encoded + "&type=artist";
-            case "albums" -> "q=" + encoded + "&type=master";
-            case "songs" -> "track=" + encoded + "&type=master";
+            case "albums" -> "q=" + encoded + "&type=release";
+            case "songs" -> "track=" + encoded + "&type=release";
             default -> "q=" + encoded;
         };
-        var response = api.fetchCatalogResource("/database/search?" + filter + "&per_page=40&page=1");
+        String path = "/database/search?" + filter + "&per_page=40&page=1";
+        if ("all".equals(type)) return searchAll(key, query, path);
+        var response = api.fetchCatalogResource(path);
         if (response.status() != 200) return response.failure();
         List<Item> direct = searchItems(response.data(), "songs".equals(type) ? query : null);
-        if (!"all".equals(type)) return cacheSearch(key, direct.stream().limit(20).toList());
+        return cacheSearch(key, direct.stream().limit(20).toList());
+    }
 
-        var songs = api.fetchCatalogResource("/database/search?track=" + encoded + "&type=master&per_page=20&page=1");
-        if (songs.status() != 200) return songs.failure();
-        List<Item> songItems = searchItems(songs.data(), query);
-        Map<String, Item> merged = new LinkedHashMap<>();
-        for (int i = 0; i < Math.max(direct.size(), songItems.size()) && merged.size() < 20; i++) {
-            if (i < direct.size()) putItem(merged, direct.get(i));
-            if (i < songItems.size() && merged.size() < 20) putItem(merged, songItems.get(i));
+    private CatalogResult<Search> searchAll(String key, String query, String path) throws IOException, InterruptedException {
+        var directRequest = api.fetchCatalogResourceAsync(path);
+        var songRequest = api.fetchCatalogResourceAsync(
+                "/database/search?track=" + DiscogsUrlUtils.urlEncode(query) + "&type=release&per_page=20&page=1");
+        try {
+            var response = DiscogsApiClient.awaitCatalogResource(directRequest);
+            if (response.status() != 200) return response.failure();
+            var songs = DiscogsApiClient.awaitCatalogResource(songRequest);
+            if (songs.status() != 200) return songs.failure();
+            List<Item> direct = searchItems(response.data(), null);
+            List<Item> songItems = searchItems(songs.data(), query);
+            Map<String, Item> merged = new LinkedHashMap<>();
+            for (int i = 0; i < Math.max(direct.size(), songItems.size()); i++) {
+                if (i < direct.size()) putItem(merged, direct.get(i));
+                if (i < songItems.size()) putItem(merged, songItems.get(i));
+            }
+            return cacheSearch(key, merged.values().stream().limit(20).toList());
+        } finally {
+            directRequest.cancel(true);
+            songRequest.cancel(true);
         }
-        return cacheSearch(key, List.copyOf(merged.values()));
     }
 
     private CatalogResult<Search> cacheSearch(String key, List<Item> items) {
         var search = new Search(items);
-        synchronized (searches) {
-            if (searches.size() >= 64) searches.remove(searches.keySet().iterator().next());
-            searches.put(key, new CachedSearch(System.nanoTime(), search));
-        }
+        cache(searches, key, search);
         return CatalogResult.success(search);
     }
 
+    private static <K, T> T cached(Map<K, Cached<T>> cache, K key) {
+        synchronized (cache) {
+            var entry = cache.get(key);
+            return entry != null && System.nanoTime() - entry.time() < CACHE_TTL_NANOS ? entry.data() : null;
+        }
+    }
+
+    private static <K, T> void cache(Map<K, Cached<T>> cache, K key, T data) {
+        synchronized (cache) {
+            if (!cache.containsKey(key) && cache.size() >= CACHE_LIMIT) cache.remove(cache.keySet().iterator().next());
+            cache.put(key, new Cached<>(System.nanoTime(), data));
+        }
+    }
+
     public CatalogResult<Artist> artist(int id, int page) throws IOException, InterruptedException {
-        var profile = api.fetchCatalogResource("/artists/" + id);
-        if (profile.status() != 200) return profile.failure();
+        JsonNode profile = cached(profiles, id);
+        if (profile == null) {
+            var response = api.fetchCatalogResource("/artists/" + id);
+            if (response.status() != 200) return response.failure();
+            profile = response.data();
+            if (text(profile, "name").isBlank()) throw new IOException("Invalid Discogs artist response");
+            cache(profiles, id, profile);
+        }
         var releases = api.fetchCatalogResource("/artists/" + id
                 + "/releases?sort=year&sort_order=desc&per_page=100&page=" + page);
         if (releases.status() != 200) return releases.failure();
         JsonNode root = releases.data();
-        String name = text(profile.data(), "name");
-        if (name.isBlank() || !root.path("releases").isArray()) throw new IOException("Invalid Discogs artist response");
+        String name = text(profile, "name");
+        if (!root.path("releases").isArray()) throw new IOException("Invalid Discogs artist response");
         Map<String, Item> albums = new LinkedHashMap<>();
         for (JsonNode row : array(root, "releases")) {
             // Main releases include albums, EPs and singles. Guest credits are excluded.
@@ -85,7 +116,7 @@ public final class DiscogsCatalog {
                     image(row), webUrl(kind, itemId), null));
         }
         int pages = Math.max(1, root.path("pagination").path("pages").asInt(1));
-        return CatalogResult.success(new Artist(id, name, image(profile.data()), webUrl("artist", id),
+        return CatalogResult.success(new Artist(id, name, image(profile), webUrl("artist", id),
                 List.copyOf(albums.values()), page, pages, root.path("pagination").path("items").asInt()));
     }
 
@@ -150,7 +181,12 @@ public final class DiscogsCatalog {
     }
 
     private static void putItem(Map<String, Item> items, Item item) {
-        items.putIfAbsent(item.kind() + ":" + item.id(), item);
+        String key = item.kind() + ":" + item.id();
+        var previous = items.putIfAbsent(key, item);
+        if (previous != null && previous.songQuery() == null && item.songQuery() != null) {
+            items.put(key, new Item(previous.id(), previous.kind(), previous.title(), previous.artist(), previous.year(),
+                    previous.image(), previous.url(), item.songQuery()));
+        }
     }
 
     private static Iterable<JsonNode> array(JsonNode node, String key) {

@@ -1,6 +1,6 @@
 import { readApiError } from "./api-errors.js";
 import { loadCustomVendors } from "./vendors.js";
-import { renderItems, renderLoading, renderMessage, renderArtist, renderAlbum, element } from "./quicksearch-view.js";
+import { renderItems, renderLoading, renderMessage, renderArtist, renderAlbum, renderProviders, element } from "./quicksearch-view.js";
 
 export function initQuicksearch(trigger) {
     if (!(trigger instanceof HTMLButtonElement) || document.getElementById("quicksearch-dialog")) return;
@@ -51,7 +51,8 @@ export function initQuicksearch(trigger) {
     let generation = 0;
     let items = [];
     let frames = [{ kind: "search", scroll: 0 }];
-    let vendorsLoaded = false;
+    let vendorsRequest;
+    let vendorError = "";
     const current = () => frames[frames.length - 1];
 
     function cancelRequest() {
@@ -114,7 +115,10 @@ export function initQuicksearch(trigger) {
         results.removeAttribute("aria-busy");
         if (!response.ok) {
             status.textContent = response.message;
-            renderMessage(results, "Search unavailable", response.message, search);
+            renderMessage(results, "Search unavailable", response.message, () => {
+                input.focus({ preventScroll: true });
+                search();
+            });
             return;
         }
         items = response.data.items;
@@ -147,6 +151,7 @@ export function initQuicksearch(trigger) {
         content.setAttribute("aria-busy", "true");
         renderLoading(content);
         back.focus({ preventScroll: true });
+        if (frame.kind === "album") loadVendors();
         const params = new URLSearchParams({ id: frame.item.id });
         if (frame.kind === "album") params.set("kind", frame.item.kind);
         const response = await get(`/api/quicksearch/${frame.kind}?${params}`, request.signal);
@@ -158,33 +163,54 @@ export function initQuicksearch(trigger) {
             return;
         }
         frame.data = response.data;
-        if (frame.kind === "album" && !vendorsLoaded) {
-            await loadCustomVendors();
-            vendorsLoaded = true;
-            if (version !== generation || !dialog.open) return;
-        }
         renderFrame(frame).focus();
     }
 
-    function renderFrame(frame, loadingMore = false) {
+    function loadVendors() {
+        if (vendorsRequest) return;
+        vendorsRequest = loadCustomVendors().then(loaded => {
+            vendorError = loaded ? "" : "Custom shop settings could not load. Default shop links are shown.";
+            if (!loaded) vendorsRequest = null;
+            const frame = current();
+            if (!dialog.open || frame.kind !== "album" || !frame.data || content.hasAttribute("aria-busy")) return;
+            detailStatus.textContent = vendorError;
+            if (!loaded) return;
+            const providers = content.querySelector(".qs-providers");
+            const focused = providers.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+            const scroll = detailScroll.scrollTop;
+            renderProviders(providers, frame.data);
+            if (focused) restoreFocus(providers, focused, providers.querySelector("a") || back);
+            detailScroll.scrollTop = scroll;
+        });
+    }
+
+    function restoreFocus(scope, key, fallback) {
+        const focused = [...scope.querySelectorAll("[data-key]")].find(node => node.dataset.key === key);
+        (focused || fallback).focus({ preventScroll: true });
+    }
+
+    function renderFrame(frame) {
         content.removeAttribute("aria-busy");
         detailStatus.textContent = "";
         if (frame.kind === "artist") {
             detailStatus.textContent = `${frame.data.albums.length} releases loaded`;
-            return renderArtist(content, frame.data, select, loadMore, loadingMore);
+            return renderArtist(content, frame.data, select, loadMore);
         }
+        detailStatus.textContent = vendorError;
         return renderAlbum(content, frame.data, select, frame.item.songQuery);
     }
 
     async function loadMore() {
         const frame = current();
-        if (frame.kind !== "artist" || frame.data.page >= frame.data.pages) return;
+        const more = content.querySelector(".qs-load-more");
+        if (frame.kind !== "artist" || frame.data.page >= frame.data.pages || more?.getAttribute("aria-disabled") === "true") return;
         cancelRequest();
         const version = generation;
         request = new AbortController();
         const scroll = detailScroll.scrollTop;
         const count = frame.data.albums.length;
-        renderFrame(frame, true);
+        more.setAttribute("aria-disabled", "true");
+        more.textContent = "Loading releases…";
         detailStatus.textContent = "Loading more releases…";
         detailScroll.scrollTop = scroll;
         const response = await get(`/api/quicksearch/artist?${new URLSearchParams({ id: frame.item.id, page: frame.data.page + 1 })}`, request.signal);
@@ -220,8 +246,7 @@ export function initQuicksearch(trigger) {
         }
         back.textContent = frames.length < 3 ? "← Back to results" : "← Back";
         const scope = frame.kind === "search" ? results : content;
-        const focused = [...scope.querySelectorAll(".qs-result")].find(button => button.dataset.key === frame.focusKey);
-        (focused || (frame.kind === "search" ? input : back)).focus({ preventScroll: true });
+        restoreFocus(scope, frame.focusKey, frame.kind === "search" ? input : back);
     });
 
     dialog.addEventListener("keydown", event => {
