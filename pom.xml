@@ -13,7 +13,7 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jacoco.coverage.minimum>0.50</jacoco.coverage.minimum>
-        <logback.version>1.6.1</logback.version>
+        <logback.version>1.6.5</logback.version>
     </properties>
 
     <dependencies>
