@@ -6,6 +6,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
@@ -78,6 +80,45 @@ class DiscogsCatalogTest {
         assertTrue(query.get().contains("track=One+More+Time&type=release"));
         assertFalse(query.get().contains("q="));
         assertEquals("One More Time", result.data().items().getFirst().songQuery());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"songs", "all"})
+    void songMatchesOpenTheEditionWithTheBonusTrack(String type) throws Exception {
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            if ("/database/search".equals(path)) {
+                boolean songs = exchange.getRequestURI().getRawQuery().contains("track=");
+                respond(exchange, 200, songs ? """
+                        {"results":[
+                          {"id":99,"master_id":7,"type":"release","title":"Artist - Bonus Edition","year":2005},
+                          {"id":100,"master_id":7,"type":"release","title":"Artist - Another Bonus Edition"}]}
+                        """ : """
+                        {"results":[{"id":7,"type":"master","title":"Artist - Original Album","year":2001}]}
+                        """);
+            } else {
+                respond(exchange, 200, "/releases/99".equals(path) ? """
+                        {"title":"Bonus Edition","tracklist":[{"title":"Main Track"},{"title":"Bonus Track"}]}
+                        """ : """
+                        {"title":"Original Album","tracklist":[{"title":"Main Track"}]}
+                        """);
+            }
+        });
+        assertFalse(catalog.album(7, "master").data().tracks().stream()
+                .anyMatch(track -> "Bonus Track".equals(track.title())));
+        var items = catalog.search("Bonus Track", type).data().items();
+        assertEquals(1, items.size(), "Editions must still share one result");
+        var match = items.getFirst();
+        assertEquals(99, match.id());
+        assertEquals("release", match.kind());
+        assertEquals("Bonus Edition", match.title());
+        assertEquals(2005, match.year());
+        assertEquals("https://www.discogs.com/release/99", match.url());
+        assertEquals("Bonus Track", match.songQuery());
+        var detail = catalog.album(match.id(), match.kind()).data();
+        assertTrue(detail.tracks().stream().anyMatch(track -> "Bonus Track".equals(track.title())));
+        assertTrue(detail.marketplaceUrl().contains("release_id=99&format=Vinyl"));
     }
 
     @Test

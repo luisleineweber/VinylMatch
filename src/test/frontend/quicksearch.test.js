@@ -77,6 +77,32 @@ async function openAlbum(dialog) {
 }
 
 const tests = [
+    ["Search results remain reachable in short windows", async () => {
+        const matches = Array.from({ length: 20 }, (_, index) => ({ ...item, id: index + 1, title: `Album ${index + 1}` }));
+        await withDialog(url => url.startsWith("/api/quicksearch?") ? json({ items: matches }) : defaultResponse(url), async dialog => {
+            enterQuery(dialog);
+            await until(() => dialog.querySelectorAll(".qs-result").length === matches.length);
+            const results = dialog.querySelector(".qs-results");
+            const pane = dialog.querySelector(".qs-search-pane");
+            assert(results.clientHeight > 0, "The results area has zero height");
+            for (const index of [0, matches.length - 1]) {
+                const result = results.querySelectorAll(".qs-result")[index];
+                result.scrollIntoView({ block: "center" });
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                const bounds = result.getBoundingClientRect();
+                const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+                assert(bounds.height >= 44 && result.contains(hit), "A result cannot receive a touch");
+                const position = { results: results.scrollTop, pane: pane.scrollTop };
+                hit.click();
+                await until(() => dialog.querySelector(".qs-album-artists"));
+                dialog.querySelector(".qs-back").click();
+                assert(document.activeElement.dataset.key === `master:${index + 1}`, "Back lost result focus");
+                assert(results.scrollTop === position.results && pane.scrollTop === position.pane, "Back lost search scroll");
+            }
+            const close = dialog.querySelector(".qs-close").getBoundingClientRect();
+            assert(close.top >= 0 && close.bottom <= innerHeight, "Close moved outside the viewport");
+        });
+    }],
     ["Retry keeps focus inside the dialog", async () => {
         let searches = 0;
         const retry = deferred();

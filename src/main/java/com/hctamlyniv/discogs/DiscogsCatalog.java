@@ -42,8 +42,8 @@ public final class DiscogsCatalog {
         if ("all".equals(type)) return searchAll(key, query, path);
         var response = api.fetchCatalogResource(path);
         if (response.status() != 200) return response.failure();
-        List<Item> direct = searchItems(response.data(), "songs".equals(type) ? query : null);
-        return cacheSearch(key, direct.stream().limit(20).toList());
+        var direct = searchItems(response.data(), "songs".equals(type) ? query : null);
+        return cacheSearch(key, direct.values().stream().limit(20).toList());
     }
 
     private CatalogResult<Search> searchAll(String key, String query, String path) throws IOException, InterruptedException {
@@ -55,12 +55,12 @@ public final class DiscogsCatalog {
             if (response.status() != 200) return response.failure();
             var songs = DiscogsApiClient.awaitCatalogResource(songRequest);
             if (songs.status() != 200) return songs.failure();
-            List<Item> direct = searchItems(response.data(), null);
-            List<Item> songItems = searchItems(songs.data(), query);
+            var direct = new ArrayList<>(searchItems(response.data(), null).entrySet());
+            var songItems = new ArrayList<>(searchItems(songs.data(), query).entrySet());
             Map<String, Item> merged = new LinkedHashMap<>();
             for (int i = 0; i < Math.max(direct.size(), songItems.size()); i++) {
-                if (i < direct.size()) putItem(merged, direct.get(i));
-                if (i < songItems.size()) putItem(merged, songItems.get(i));
+                if (i < direct.size()) putItem(merged, direct.get(i).getKey(), direct.get(i).getValue());
+                if (i < songItems.size()) putItem(merged, songItems.get(i).getKey(), songItems.get(i).getValue());
             }
             return cacheSearch(key, merged.values().stream().limit(20).toList());
         } finally {
@@ -112,7 +112,7 @@ public final class DiscogsCatalog {
             int itemId = row.path("id").asInt();
             if (itemId < 1 || !("master".equals(kind) || "release".equals(kind))) continue;
             if ("release".equals(kind) && row.path("master_id").asInt() > 0) continue;
-            putItem(albums, new Item(itemId, kind, text(row, "title"), name, year(row),
+            putItem(albums, kind + ":" + itemId, new Item(itemId, kind, text(row, "title"), name, year(row),
                     image(row), webUrl(kind, itemId), null));
         }
         int pages = Math.max(1, root.path("pagination").path("pages").asInt(1));
@@ -157,16 +157,22 @@ public final class DiscogsCatalog {
         }
     }
 
-    private static List<Item> searchItems(JsonNode root, String song) throws IOException {
+    private static Map<String, Item> searchItems(JsonNode root, String song) throws IOException {
         if (!root.path("results").isArray()) throw new IOException("Invalid Discogs search response");
         Map<String, Item> items = new LinkedHashMap<>();
         for (JsonNode row : array(root, "results")) {
             String kind = row.path("type").asText();
             int id = row.path("id").asInt();
             if (id < 1 || !("artist".equals(kind) || "master".equals(kind) || "release".equals(kind))) continue;
+            String key = kind + ":" + id;
             if ("release".equals(kind) && row.path("master_id").asInt() > 0) {
-                kind = "master";
-                id = row.path("master_id").asInt();
+                int masterId = row.path("master_id").asInt();
+                key = "master:" + masterId;
+                // Group editions together, but open the edition that contains the matched song.
+                if (song == null) {
+                    kind = "master";
+                    id = masterId;
+                }
             }
             String title = text(row, "title");
             String artist = "";
@@ -175,17 +181,15 @@ public final class DiscogsCatalog {
                 artist = title.substring(0, separator);
                 title = title.substring(separator + 3);
             }
-            putItem(items, new Item(id, kind, title, artist, year(row), image(row), webUrl(kind, id), song));
+            putItem(items, key, new Item(id, kind, title, artist, year(row), image(row), webUrl(kind, id), song));
         }
-        return List.copyOf(items.values());
+        return items;
     }
 
-    private static void putItem(Map<String, Item> items, Item item) {
-        String key = item.kind() + ":" + item.id();
+    private static void putItem(Map<String, Item> items, String key, Item item) {
         var previous = items.putIfAbsent(key, item);
         if (previous != null && previous.songQuery() == null && item.songQuery() != null) {
-            items.put(key, new Item(previous.id(), previous.kind(), previous.title(), previous.artist(), previous.year(),
-                    previous.image(), previous.url(), item.songQuery()));
+            items.put(key, item);
         }
     }
 

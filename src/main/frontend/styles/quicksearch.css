@@ -304,6 +304,21 @@ body.quicksearch-open {
     background: var(--bg-secondary);
 }
 
+@media (max-height: 30rem) {
+    .qs-search-pane {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+    .qs-search-pane > * {
+        flex-shrink: 0;
+    }
+    .qs-results {
+        max-height: none;
+        overflow-y: visible;
+        scrollbar-gutter: auto;
+    }
+}
+
 @media (max-width: 40rem) {
     #header .quicksearch-open {
         min-height: 44px;
