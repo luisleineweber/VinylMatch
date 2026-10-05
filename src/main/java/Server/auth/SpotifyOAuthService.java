@@ -23,7 +23,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SpotifyOAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(SpotifyOAuthService.class);
-    private static final String[] SCOPES = {"playlist-read-private", "playlist-read-collaborative"};
+    private static final String[] SCOPES = {
+            "playlist-read-private",
+            "playlist-read-collaborative",
+            "user-read-currently-playing"
+    };
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     
     // Pending authorization states (state -> session id)

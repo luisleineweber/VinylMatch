@@ -3,6 +3,7 @@ package com.hctamlyniv.discogs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hctamlyniv.discogs.model.CuratedLink;
+import com.hctamlyniv.discogs.model.DiscogsMatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,8 +28,8 @@ public class DiscogsCacheStore {
     private final Path curatedLinksFile;
     private final ObjectMapper mapper;
 
-    private final Map<String, String> albumCache = new ConcurrentHashMap<>();
-    private final Map<String, String> barcodeCache = new ConcurrentHashMap<>();
+    private final Map<String, DiscogsMatch> albumCache = new ConcurrentHashMap<>();
+    private final Map<String, DiscogsMatch> barcodeCache = new ConcurrentHashMap<>();
     private final Map<String, CuratedLink> curatedLinks = new ConcurrentHashMap<>();
     private final ReentrantLock persistenceLock = new ReentrantLock();
 
@@ -53,22 +54,28 @@ public class DiscogsCacheStore {
     }
 
     public Optional<String> peekCachedUri(String artist, String album, Integer releaseYear, String barcode) {
+        return peekCachedMatch(artist, album, releaseYear, barcode).map(DiscogsMatch::url);
+    }
+
+    public Optional<DiscogsMatch> peekCachedMatch(String artist, String album, Integer releaseYear, String barcode) {
         if (barcode != null && !barcode.isBlank()) {
-            String byBarcode = barcodeCache.get(barcode);
+            DiscogsMatch byBarcode = barcodeCache.get(barcode);
             if (byBarcode != null) {
                 return Optional.of(byBarcode);
             }
         }
         String key = buildCacheKey(artist != null ? artist.trim() : null, album != null ? album.trim() : null, releaseYear);
-        String cached = albumCache.get(key);
+        DiscogsMatch cached = albumCache.get(key);
         return cached != null ? Optional.of(cached) : Optional.empty();
     }
 
     public Optional<String> findCuratedLink(String cacheKey, String barcode) {
         if (barcode != null && !barcode.isBlank()) {
-            String fromBarcode = barcodeCache.get(barcode);
-            if (fromBarcode != null) {
-                return Optional.of(fromBarcode);
+            for (CuratedLink candidate : curatedLinks.values()) {
+                if (candidate != null && barcode.equals(candidate.barcode())
+                        && candidate.url() != null && !candidate.url().isBlank()) {
+                    return Optional.of(candidate.url());
+                }
             }
         }
         CuratedLink link = curatedLinks.get(cacheKey);
@@ -79,15 +86,31 @@ public class DiscogsCacheStore {
     }
 
     public void rememberResult(String cacheKey, String url, String barcode) {
+        rememberResult(cacheKey, DiscogsMatch.legacyCache(url), barcode);
+    }
+
+    public void rememberResult(String cacheKey, DiscogsMatch match, String barcode) {
+        if (match == null) {
+            return;
+        }
+        String url = match.url();
         String safeUrl = DiscogsUrlUtils.sanitizeDiscogsWebUrl(url);
         if (safeUrl == null) {
             return;
         }
+        DiscogsMatch safeMatch = new DiscogsMatch(
+                safeUrl,
+                match.matchType(),
+                match.confidence(),
+                match.source(),
+                match.reason(),
+                match.vinylFormatConfirmed()
+        );
         if (cacheKey != null && !cacheKey.isBlank()) {
-            albumCache.put(cacheKey, safeUrl);
+            albumCache.put(cacheKey, safeMatch);
         }
         if (barcode != null && !barcode.isBlank()) {
-            barcodeCache.put(barcode, safeUrl);
+            barcodeCache.put(barcode, safeMatch);
         }
         persistAlbumCache();
     }
@@ -112,7 +135,14 @@ public class DiscogsCacheStore {
                 "manual"
         );
         curatedLinks.put(cacheKey, link);
-        rememberResult(cacheKey, safeUrl, barcode);
+        rememberResult(cacheKey, new DiscogsMatch(
+                safeUrl,
+                safeUrl.toLowerCase().contains("/master/") ? "EXACT_MASTER" : "EXACT_RELEASE",
+                "HIGH",
+                "MANUAL_CURATION",
+                "A VinylMatch curator selected this Discogs entry.",
+                false
+        ), barcode);
         persistCuratedLinks();
         return link;
     }
@@ -133,7 +163,7 @@ public class DiscogsCacheStore {
                 while (fields.hasNext()) {
                     Map.Entry<String, JsonNode> entry = fields.next();
                     if (entry.getValue() != null && !entry.getValue().isNull()) {
-                        albumCache.put(entry.getKey(), entry.getValue().asText());
+                        albumCache.put(entry.getKey(), readMatch(entry.getValue()));
                     }
                 }
             }
@@ -143,7 +173,7 @@ public class DiscogsCacheStore {
                 while (fields.hasNext()) {
                     Map.Entry<String, JsonNode> entry = fields.next();
                     if (entry.getValue() != null && !entry.getValue().isNull()) {
-                        barcodeCache.put(entry.getKey(), entry.getValue().asText());
+                        barcodeCache.put(entry.getKey(), readMatch(entry.getValue()));
                     }
                 }
             }
@@ -180,10 +210,17 @@ public class DiscogsCacheStore {
                     CuratedLink link = new CuratedLink(cacheKey, artist, album, year, trackTitle, barcode, url, thumb, collectedAt, source);
                     curatedLinks.put(cacheKey, link);
                     if (cacheKey != null && url != null && !url.isBlank()) {
-                        albumCache.put(cacheKey, url);
+                        albumCache.put(cacheKey, new DiscogsMatch(
+                                url,
+                                url.toLowerCase().contains("/master/") ? "EXACT_MASTER" : "EXACT_RELEASE",
+                                "HIGH",
+                                "MANUAL_CURATION",
+                                "A VinylMatch curator selected this Discogs entry.",
+                                false
+                        ));
                     }
                     if (barcode != null && !barcode.isBlank() && url != null && !url.isBlank()) {
-                        barcodeCache.put(barcode, url);
+                        barcodeCache.put(barcode, albumCache.get(cacheKey));
                     }
                 }
             }
@@ -230,5 +267,15 @@ public class DiscogsCacheStore {
         }
         return v.asText();
     }
-}
 
+    private DiscogsMatch readMatch(JsonNode value) throws IOException {
+        if (value.isTextual()) {
+            return DiscogsMatch.legacyCache(value.asText());
+        }
+        DiscogsMatch match = mapper.treeToValue(value, DiscogsMatch.class);
+        if (match == null || match.url() == null || match.url().isBlank()) {
+            throw new IOException("Invalid Discogs match cache entry");
+        }
+        return match;
+    }
+}

@@ -4,6 +4,7 @@ import Server.auth.SpotifyOAuthService;
 import Server.cache.PlaylistCache;
 import Server.http.ApiFilters;
 import Server.http.HttpUtils;
+import Server.http.OAuthCallbackPage;
 import Server.session.SpotifySession;
 import Server.session.SpotifySessionStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -12,10 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -171,17 +170,25 @@ public class AuthRoutes {
 
             // Handle OAuth errors
             if (error != null && !error.isBlank()) {
-                sendCallbackHtml(exchange, false, "Authorization denied: " + error);
+                String errorCode = "access_denied".equalsIgnoreCase(error)
+                    ? "spotify_authorization_denied"
+                    : "spotify_authorization_failed";
+                String errorMessage = "access_denied".equalsIgnoreCase(error)
+                    ? "Spotify authorization was cancelled. You can try again when you are ready."
+                    : "Spotify could not authorize this login. Please try again.";
+                sendCallbackHtml(exchange, false, errorCode, errorMessage);
                 return;
             }
 
             if (code == null || code.isBlank()) {
-                sendCallbackHtml(exchange, false, "Missing authorization code");
+                sendCallbackHtml(exchange, false, "spotify_callback_missing_code",
+                    "Spotify returned without an authorization code. Please start the login again.");
                 return;
             }
 
             if (state == null || state.isBlank()) {
-                sendCallbackHtml(exchange, false, "Missing state parameter (CSRF protection)");
+                sendCallbackHtml(exchange, false, "spotify_callback_missing_state",
+                    "The Spotify login could not be verified. Please start the login again.");
                 return;
             }
 
@@ -191,8 +198,9 @@ public class AuthRoutes {
             if (session == null) {
                 String host = exchange.getRequestHeaders().getFirst("Host");
                 log.warn("No session cookie on Spotify callback (Host={}). This is usually a hostname mismatch (localhost vs 127.0.0.1) between /api/auth/login and the redirect URI. Ensure you use the same hostname (prefer 127.0.0.1) for both login and callback.", host);
-                session = sessionStore.createSession(exchange);
-                log.info("Created new session for callback: {}", session.getSessionId());
+                sendCallbackHtml(exchange, false, "spotify_session_missing",
+                    "Your login session is missing or expired. Use the same address as before and start the login again.");
+                return;
             } else {
                 log.info("Found existing session for callback: {}", session.getSessionId());
             }
@@ -209,13 +217,16 @@ public class AuthRoutes {
                 } catch (Exception ignored) {}
 
                 playlistCache.invalidateForAuthChange(session.getSessionId());
-                sendCallbackHtml(exchange, true, "Login successful! You can close this window.");
+                sendCallbackHtml(exchange, true, "spotify_auth_success",
+                    "Spotify is connected. You can return to VinylMatch.");
             } else {
-                sendCallbackHtml(exchange, false, "Token exchange failed. Please try again.");
+                sendCallbackHtml(exchange, false, "spotify_token_exchange_failed",
+                    "Spotify could not complete the login. Please start the login again.");
             }
         } catch (Exception e) {
             log.warn("Auth callback failed: {}", e.getMessage());
-            sendCallbackHtml(exchange, false, "Error: " + e.getMessage());
+            sendCallbackHtml(exchange, false, "spotify_callback_failed",
+                "The Spotify login failed unexpectedly. Please try again.");
         }
     }
 
@@ -318,219 +329,8 @@ public class AuthRoutes {
         return false;
     }
 
-    private void sendCallbackHtml(HttpExchange exchange, boolean success, String message) throws IOException {
-        String status = success ? "Spotify connected" : "Spotify connection failed";
-        String badge = success ? "SUCCESS" : "ERROR";
-        String closeHint = success ? "This window closes automatically in a moment." : "You can close this window and try again.";
-        String safeMessage = escapeHtml(message);
-        String html = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>VinylMatch - %s</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body {
-                        margin: 0;
-                        min-height: 100vh;
-                        display: grid;
-                        place-items: center;
-                        padding: 20px;
-                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-                        background: #f3f3f3;
-                        color: #312f2c;
-                    }
-                    .card {
-                        width: min(460px, 100%%);
-                        border-radius: 16px;
-                        border: 1px solid rgba(49, 47, 44, 0.14);
-                        background: #ffffff;
-                        box-shadow: 0 10px 30px rgba(49, 47, 44, 0.08);
-                        padding: 26px 24px;
-                        text-align: center;
-                    }
-                    .eyebrow {
-                        margin: 0 0 10px;
-                        font-size: 11px;
-                        letter-spacing: 0.16em;
-                        font-weight: 700;
-                        text-transform: uppercase;
-                        color: rgba(49, 47, 44, 0.62);
-                    }
-                    .badge {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-width: 86px;
-                        height: 28px;
-                        border-radius: 999px;
-                        font-size: 11px;
-                        font-weight: 700;
-                        letter-spacing: 0.06em;
-                        margin-bottom: 16px;
-                    }
-                    .badge-success {
-                        background: rgba(31, 122, 63, 0.12);
-                        color: #1f7a3f;
-                        border: 1px solid rgba(31, 122, 63, 0.2);
-                    }
-                    .badge-error {
-                        background: rgba(178, 51, 51, 0.12);
-                        color: #b23333;
-                        border: 1px solid rgba(178, 51, 51, 0.2);
-                    }
-                    h1 {
-                        margin: 0 0 12px;
-                        font-size: clamp(22px, 4vw, 28px);
-                        line-height: 1.2;
-                        letter-spacing: -0.01em;
-                    }
-                    p {
-                        margin: 0;
-                        color: rgba(49, 47, 44, 0.82);
-                        line-height: 1.6;
-                    }
-                    .close-hint {
-                        margin-top: 12px;
-                        color: rgba(49, 47, 44, 0.62);
-                    }
-                    .actions {
-                        margin-top: 22px;
-                    }
-                    .btn {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-width: 170px;
-                        height: 40px;
-                        border-radius: 10px;
-                        border: 1px solid rgba(49, 47, 44, 0.18);
-                        background: #312f2c;
-                        color: #fafafa;
-                        text-decoration: none;
-                        font-weight: 650;
-                        font-size: 14px;
-                        cursor: pointer;
-                    }
-                    .btn:hover {
-                        background: #262422;
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        body {
-                            background: #312f2c;
-                            color: #fafafa;
-                        }
-                        .card {
-                            background: rgba(250, 250, 250, 0.06);
-                            border-color: rgba(250, 250, 250, 0.16);
-                            box-shadow: none;
-                        }
-                        .eyebrow {
-                            color: rgba(250, 250, 250, 0.62);
-                        }
-                        p {
-                            color: rgba(250, 250, 250, 0.82);
-                        }
-                        .close-hint {
-                            color: rgba(250, 250, 250, 0.62);
-                        }
-                        .badge-success {
-                            background: rgba(121, 219, 161, 0.14);
-                            color: #79dba1;
-                            border-color: rgba(121, 219, 161, 0.26);
-                        }
-                        .badge-error {
-                            background: rgba(255, 151, 151, 0.16);
-                            color: #ff9797;
-                            border-color: rgba(255, 151, 151, 0.26);
-                        }
-                        .btn {
-                            background: #fafafa;
-                            color: #312f2c;
-                            border-color: rgba(250, 250, 250, 0.2);
-                        }
-                        .btn:hover {
-                            background: #efefef;
-                        }
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <p class="eyebrow">VinylMatch</p>
-                    <div class="badge %s">%s</div>
-                    <h1>%s</h1>
-                    <p>%s</p>
-                    <p class="close-hint">%s</p>
-                    <div class="actions">
-                        <a class="btn" id="oauth-callback-action" href="/">Back to app</a>
-                    </div>
-                </div>
-                <script>
-                    (function() {
-                        var success = %s;
-                        var payload = { type: 'spotify-auth-callback', success: success };
-                        if (window.opener && !window.opener.closed) {
-                            try {
-                                window.opener.postMessage(payload, window.location.origin);
-                            } catch (e) {
-                                window.opener.postMessage(payload, '*');
-                            }
-                        }
-
-                        var action = document.getElementById('oauth-callback-action');
-                        if (action) {
-                            action.addEventListener('click', function(event) {
-                                if (window.opener) {
-                                    event.preventDefault();
-                                    window.close();
-                                    if (!window.closed) {
-                                        window.location.href = '/';
-                                    }
-                                }
-                            });
-                        }
-
-                        if (success) {
-                            setTimeout(function() {
-                                window.close();
-                                if (!window.closed) {
-                                    window.location.href = '/';
-                                }
-                            }, 1200);
-                        }
-                    }
-                    )();
-                </script>
-            </body>
-            </html>
-            """.formatted(
-                status,
-                success ? "badge-success" : "badge-error",
-                badge,
-                status,
-                safeMessage,
-                closeHint,
-                success
-            );
-
-        byte[] body = html.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-        exchange.sendResponseHeaders(200, body.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-        }
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) return "";
-        return value
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;");
+    private void sendCallbackHtml(HttpExchange exchange, boolean success, String code, String message) throws IOException {
+        OAuthCallbackPage.send(exchange, OAuthCallbackPage.Provider.SPOTIFY, success, code, message);
     }
 
     public record AccessTokenResolution(String token, boolean userAuthenticated) {}

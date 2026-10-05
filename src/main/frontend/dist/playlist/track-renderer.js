@@ -6,7 +6,7 @@
 import { primaryArtist, normalizeForSearch } from "../common/playlist-utils.js";
 import { getVendors, buildVendorUrl } from "../common/vendors.js";
 import { buildTrackKey, registerTrackElement } from "./track-registry.js";
-import { safeDiscogsUrl, markDiscogsResult, discogsState } from "./discogs-state.js";
+import { safeDiscogsUrl, markDiscogsResult, discogsState, normalizeDiscogsMatch } from "./discogs-state.js";
 import { discogsUiState, rememberLibraryState, scheduleLibraryRefresh } from "./discogs-ui.js";
 
 function emitPlaylistStatus(message, tone = "neutral") {
@@ -58,6 +58,8 @@ const DEFAULT_VENDOR_ICONS = {
     amazon: { light: "/design/amazon_trans_black.svg", dark: "/design/amazon_trans_white.svg" },
 };
 
+let matchEvidenceIdCounter = 0;
+
 function resolveVendorIcons(vendor) {
     if (!vendor) return null;
     const fallback = DEFAULT_VENDOR_ICONS[vendor.id] || null;
@@ -100,18 +102,24 @@ function appendVendorIcons(link, vendor, fallback) {
     link.appendChild(dark);
 }
 
-export function determineMatchQuality(url) {
-    if (!url || typeof url !== "string") {
+export function determineMatchQuality(match) {
+    if (!match || typeof match !== "object") {
         return { level: "poor", label: "Search now" };
     }
-    const normalized = url.toLowerCase();
-    if (normalized.includes("/release/") || normalized.includes("/master/")) {
-        return { level: "good", label: "Direct match" };
+    switch (match.matchType) {
+        case "EXACT_RELEASE":
+            return { level: "good", label: "Release match" };
+        case "EXACT_MASTER":
+            return { level: "medium", label: "Master match" };
+        case "LIKELY_MATCH":
+            return { level: "medium", label: "Likely match" };
+        case "CURATED_MATCH":
+            return { level: "good", label: "Curated match" };
+        case "SEARCH_ONLY":
+            return { level: "poor", label: "Search results" };
+        default:
+            return { level: "poor", label: "Verify release" };
     }
-    if (normalized.includes("/search")) {
-        return { level: "medium", label: "Results ready" };
-    }
-    return { level: "medium", label: "Link ready" };
 }
 
 export function createQualityBadge(quality) {
@@ -119,6 +127,20 @@ export function createQualityBadge(quality) {
     badge.className = `match-quality match-quality--${quality.level}`;
     badge.textContent = quality.label;
     return badge;
+}
+
+function formatMatchSource(match) {
+    switch (match?.source) {
+        case "BARCODE": return "Barcode";
+        case "MANUAL_CURATION": return "Manual curation";
+        case "DISCOGS_CATALOG": return "Discogs catalog";
+        case "DISCOGS_SEARCH": return "Discogs search";
+        case "LEGACY_CACHE": return "Legacy cache";
+        default:
+            return ["EXACT_RELEASE", "EXACT_MASTER", "LIKELY_MATCH"].includes(match?.matchType)
+                ? "Discogs match"
+                : "Unverified source";
+    }
 }
 
 export function buildVendorLinks(track) {
@@ -158,13 +180,15 @@ export function createTrackElement(track, index, state) {
     const key = buildTrackKey(track, index);
     const initialDiscogsUrl = safeDiscogsUrl(track.discogsAlbumUrl);
     track.discogsAlbumUrl = initialDiscogsUrl;
+    const initialDiscogsMatch = normalizeDiscogsMatch(track.discogsMatch);
+    track.discogsMatch = initialDiscogsMatch;
 
     const initialState = initialDiscogsUrl
         ? "found"
         : (track.discogsStatus === "not-found" ? "not-found" : "pending");
 
     const initialQuality = initialDiscogsUrl
-        ? determineMatchQuality(initialDiscogsUrl)
+        ? determineMatchQuality(initialDiscogsMatch)
         : (initialState === "not-found"
             ? { level: "poor", label: "Search now" }
             : { level: "pending", label: "Checking Discogs" });
@@ -209,6 +233,23 @@ export function createTrackElement(track, index, state) {
     const qualityBadge = createQualityBadge(initialQuality);
     metaRow.appendChild(qualityBadge);
 
+    const matchEvidenceId = `match-evidence-${matchEvidenceIdCounter++}`;
+    const matchInfoToggle = document.createElement("button");
+    matchInfoToggle.type = "button";
+    matchInfoToggle.className = "match-evidence-toggle hidden";
+    matchInfoToggle.setAttribute("aria-controls", matchEvidenceId);
+    matchInfoToggle.setAttribute("aria-expanded", "false");
+    matchInfoToggle.setAttribute("aria-label", "Show match details");
+    matchInfoToggle.innerHTML = '<span class="match-evidence-toggle__icon" aria-hidden="true">i</span><span class="sr-only">Show match details</span>';
+    metaRow.appendChild(matchInfoToggle);
+
+    const matchEvidence = document.createElement("div");
+    matchEvidence.id = matchEvidenceId;
+    matchEvidence.className = "match-evidence hidden";
+    matchEvidence.setAttribute("role", "region");
+    matchEvidence.setAttribute("aria-labelledby", matchEvidenceId + "-toggle");
+    matchInfoToggle.id = matchEvidenceId + "-toggle";
+
     const libraryBadge = document.createElement("span");
     libraryBadge.className = "discogs-library hidden";
     libraryBadge.setAttribute("role", "img");
@@ -224,6 +265,7 @@ export function createTrackElement(track, index, state) {
     infoDiv.appendChild(artistsDiv);
     infoDiv.appendChild(albumDiv);
     infoDiv.appendChild(metaRow);
+    infoDiv.appendChild(matchEvidence);
 
     const actions = document.createElement("div");
     actions.className = "actions";
@@ -244,38 +286,35 @@ export function createTrackElement(track, index, state) {
 
     let currentLibraryState = null;
 
-    const hasDirectDiscogsTarget = (url) => {
-        if (!url || typeof url !== "string") {
-            return false;
+    const setMatchEvidenceOpen = (open) => {
+        const expanded = open === true;
+        matchInfoToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+        matchEvidence.classList.toggle("hidden", !expanded);
+        matchInfoToggle.setAttribute("aria-label", expanded ? "Hide match details" : "Show match details");
+        const label = matchInfoToggle.querySelector(".sr-only");
+        if (label) {
+            label.textContent = expanded ? "Hide match details" : "Show match details";
         }
-        return !url.toLowerCase().includes("/search");
     };
 
-    const describeDiscogsState = (discogsStateVal, url) => {
-        const safeUrl = url ? safeDiscogsUrl(url) : null;
+    matchInfoToggle.addEventListener("click", () => {
+        setMatchEvidenceOpen(matchInfoToggle.getAttribute("aria-expanded") !== "true");
+    });
+
+    const hasDirectDiscogsTarget = (match) => {
+        return match?.matchType === "EXACT_RELEASE";
+    };
+
+    const describeDiscogsState = (discogsStateVal, matchValue) => {
+        const match = normalizeDiscogsMatch(matchValue);
+        const safeUrl = match?.url ?? null;
         if (discogsStateVal === "found" && safeUrl) {
-            const quality = determineMatchQuality(safeUrl);
-            if (quality.level === "good") {
-                return {
-                    quality,
-                    badgeTitle: "Direct Discogs release found. You can open it now.",
-                    buttonTitle: "Open Discogs release",
-                    buttonLabel: "Open Discogs release",
-                };
-            }
-            if (safeUrl.toLowerCase().includes("/search")) {
-                return {
-                    quality,
-                    badgeTitle: "Discogs search results are ready. Open them and choose a release.",
-                    buttonTitle: "Open Discogs search results",
-                    buttonLabel: "Open Discogs search results",
-                };
-            }
+            const quality = determineMatchQuality(match);
             return {
                 quality,
-                badgeTitle: "Discogs link is ready. You can open it now.",
-                buttonTitle: "Open on Discogs",
-                buttonLabel: "Open on Discogs",
+                badgeTitle: `Match quality: ${quality.label}`,
+                buttonTitle: match.matchType === "SEARCH_ONLY" ? "Open Discogs search results" : "Open on Discogs",
+                buttonLabel: match.matchType === "SEARCH_ONLY" ? "Open Discogs search results" : "Open on Discogs",
             };
         }
         if (discogsStateVal === "pending") {
@@ -296,7 +335,7 @@ export function createTrackElement(track, index, state) {
 
     const syncWishlistActionState = () => {
         const alreadyTracked = currentLibraryState === "wishlist" || currentLibraryState === "owned";
-        const canAdd = hasDirectDiscogsTarget(track.discogsAlbumUrl)
+        const canAdd = hasDirectDiscogsTarget(track.discogsMatch)
             && track.discogsStatus === "found"
             && discogsUiState.loggedIn
             && !alreadyTracked;
@@ -306,8 +345,8 @@ export function createTrackElement(track, index, state) {
             wishlistBtn.title = "Connect Discogs first";
         } else if (alreadyTracked) {
             wishlistBtn.title = currentLibraryState === "owned" ? "Already in collection" : "Already in wantlist";
-        } else if (track.discogsStatus === "found" && !hasDirectDiscogsTarget(track.discogsAlbumUrl)) {
-            wishlistBtn.title = "Open Discogs results and choose a release first";
+        } else if (track.discogsStatus === "found" && !hasDirectDiscogsTarget(track.discogsMatch)) {
+            wishlistBtn.title = "Verify and choose a concrete release first";
         } else {
             wishlistBtn.title = canAdd ? "Add to Discogs wantlist" : "Discogs match required";
         }
@@ -330,9 +369,10 @@ export function createTrackElement(track, index, state) {
         trackDiv.dataset.matchQuality = quality.level;
     };
 
-    const setDiscogsState = (discogsStateVal, url) => {
-        const safeUrl = url ? safeDiscogsUrl(url) : null;
-        const presentation = describeDiscogsState(discogsStateVal, safeUrl);
+    const setDiscogsState = (discogsStateVal, matchValue) => {
+        const match = normalizeDiscogsMatch(matchValue);
+        const safeUrl = match?.url ?? null;
+        const presentation = describeDiscogsState(discogsStateVal, match);
         trackDiv.dataset.discogsState = discogsStateVal;
         updateBadge(presentation.quality);
         qualityBadge.title = presentation.badgeTitle;
@@ -340,8 +380,24 @@ export function createTrackElement(track, index, state) {
         discogsBtn.title = presentation.buttonTitle;
         discogsBtn.setAttribute("aria-label", presentation.buttonLabel);
 
+        if (match) {
+            const confidence = match.confidence.toLowerCase();
+            matchEvidence.textContent = `${formatMatchSource(match)} · ${confidence} confidence · ${match.reason}`;
+            matchEvidence.title = match.vinylFormatConfirmed
+                ? "Discogs explicitly confirmed vinyl format metadata."
+                : "Vinyl format is not confirmed; verify the selected release on Discogs.";
+            matchInfoToggle.classList.remove("hidden");
+            setMatchEvidenceOpen(false);
+        } else {
+            matchEvidence.textContent = "";
+            matchEvidence.removeAttribute("title");
+            matchInfoToggle.classList.add("hidden");
+            setMatchEvidenceOpen(false);
+        }
+
         if (discogsStateVal === "found" && safeUrl) {
             track.discogsAlbumUrl = safeUrl;
+            track.discogsMatch = match;
             track.discogsStatus = "found";
             discogsBtn.classList.remove("inactive", "pending");
             discogsBtn.setAttribute("aria-disabled", "false");
@@ -357,6 +413,7 @@ export function createTrackElement(track, index, state) {
             discogsBtn.removeAttribute("rel");
         } else {
             track.discogsAlbumUrl = null;
+            track.discogsMatch = null;
             track.discogsStatus = "not-found";
             discogsBtn.href = "#";
             discogsBtn.classList.remove("pending");
@@ -429,11 +486,11 @@ export function createTrackElement(track, index, state) {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             const data = await res.json();
-            const url = typeof data?.url === "string" ? data.url : null;
-            if (url) {
-                markDiscogsResult(key, index, url, state, (delay) => scheduleLibraryRefresh(delay, state));
+            const match = normalizeDiscogsMatch(data);
+            if (match) {
+                markDiscogsResult(key, index, match, state, (delay) => scheduleLibraryRefresh(delay, state));
                 manualSearching = false;
-                window.open(url, "_blank", "noopener");
+                window.open(match.url, "_blank", "noopener");
                 return;
             }
         } catch (error) {
@@ -511,7 +568,7 @@ export function createTrackElement(track, index, state) {
     trackDiv.appendChild(actions);
 
     if (initialState === "found" && track.discogsAlbumUrl) {
-        setDiscogsState("found", track.discogsAlbumUrl);
+        setDiscogsState("found", initialDiscogsMatch ?? track.discogsAlbumUrl);
     } else if (initialState === "not-found") {
         setDiscogsState("not-found");
     } else {

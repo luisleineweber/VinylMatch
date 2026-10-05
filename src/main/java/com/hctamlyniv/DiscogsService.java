@@ -10,6 +10,7 @@ import com.hctamlyniv.discogs.DiscogsUrlUtils;
 import com.hctamlyniv.discogs.model.CurationCandidate;
 import com.hctamlyniv.discogs.model.CuratedLink;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
+import com.hctamlyniv.discogs.model.DiscogsMatch;
 import com.hctamlyniv.discogs.model.LibraryFlags;
 import com.hctamlyniv.discogs.model.WishlistResult;
 import org.slf4j.Logger;
@@ -22,6 +23,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Discogs service facade: caching + progressive matching + optional API features (profile/wishlist).
@@ -31,6 +35,9 @@ public class DiscogsService {
     private static final Logger log = LoggerFactory.getLogger(DiscogsService.class);
     private static final int TRANSIENT_RETRY_LIMIT = 3;
     private static final long TRANSIENT_RETRY_BASE_DELAY_MS = 450L;
+    private static final int MAX_PROVIDER_CONCURRENCY = envInt("DISCOGS_PROVIDER_CONCURRENCY", 6);
+    private static final Semaphore PROVIDER_PERMITS = new Semaphore(MAX_PROVIDER_CONCURRENCY, true);
+    private static final AtomicInteger ACTIVE_PROVIDER_CALLS = new AtomicInteger();
 
     private final ObjectMapper mapper;
     private final DiscogsCacheStore cacheStore;
@@ -70,6 +77,10 @@ public class DiscogsService {
         return cacheStore.peekCachedUri(artist, album, releaseYear, barcode);
     }
 
+    public Optional<DiscogsMatch> peekCachedMatch(String artist, String album, Integer releaseYear, String barcode) {
+        return cacheStore.peekCachedMatch(artist, album, releaseYear, barcode);
+    }
+
     public Optional<String> findAlbumUri(String artist, String album, Integer releaseYear) {
         return findAlbumUri(artist, album, releaseYear, null, null);
     }
@@ -79,6 +90,36 @@ public class DiscogsService {
     }
 
     public Optional<String> findAlbumUri(String artist, String album, Integer releaseYear, String trackTitle, String barcode) {
+        return findAlbumMatch(artist, album, releaseYear, trackTitle, barcode).map(DiscogsMatch::url);
+    }
+
+    public Optional<DiscogsMatch> findAlbumMatch(String artist, String album, Integer releaseYear, String trackTitle, String barcode) {
+        boolean acquired = false;
+        try {
+            acquired = PROVIDER_PERMITS.tryAcquire(250, TimeUnit.MILLISECONDS);
+            if (!acquired) {
+                return Optional.of(searchOnlyMatch(
+                    DiscogsUrlUtils.buildWebSearchUrl(artist, album, releaseYear),
+                    "Discogs capacity is temporarily saturated; review the search results manually."
+                ));
+            }
+            ACTIVE_PROVIDER_CALLS.incrementAndGet();
+            return findAlbumMatchInternal(artist, album, releaseYear, trackTitle, barcode);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Optional.of(searchOnlyMatch(
+                DiscogsUrlUtils.buildWebSearchUrl(artist, album, releaseYear),
+                "The Discogs lookup was interrupted; review the search results manually."
+            ));
+        } finally {
+            if (acquired) {
+                ACTIVE_PROVIDER_CALLS.decrementAndGet();
+                PROVIDER_PERMITS.release();
+            }
+        }
+    }
+
+    private Optional<DiscogsMatch> findAlbumMatchInternal(String artist, String album, Integer releaseYear, String trackTitle, String barcode) {
         final String origArtist = DiscogsNormalizer.extractPrimaryArtist(artist);
         final String origAlbum = album == null ? null : album.trim();
         final String origTrack = trackTitle == null ? null : trackTitle.trim();
@@ -88,23 +129,23 @@ public class DiscogsService {
 
         Optional<CuratedLink> curatedLink = curatedLinkStore.find(normalizedKey);
         if (curatedLink.isPresent() && curatedLink.get().url() != null) {
-            return Optional.of(curatedLink.get().url());
+            return Optional.of(curatedMatch(curatedLink.get().url()));
         }
         
         if (barcode != null && !barcode.isBlank()) {
             curatedLink = curatedLinkStore.findByBarcode(barcode);
             if (curatedLink.isPresent() && curatedLink.get().url() != null) {
-                return Optional.of(curatedLink.get().url());
+                return Optional.of(curatedMatch(curatedLink.get().url()));
             }
         }
 
         Optional<String> curated = cacheStore.findCuratedLink(cacheKey, barcode);
         if (curated.isPresent() && isCacheFinalResult(curated.get())) {
-            return curated;
+            return Optional.of(curatedMatch(curated.get()));
         }
 
         if (barcode != null && !barcode.isBlank()) {
-            Optional<String> cachedByBarcode = cacheStore.peekCachedUri(null, null, null, barcode);
+            Optional<DiscogsMatch> cachedByBarcode = cacheStore.peekCachedMatch(null, null, null, barcode);
             if (cachedByBarcode.isPresent() && isCacheFinalResult(cachedByBarcode.get())) {
                 return cachedByBarcode;
             }
@@ -112,8 +153,11 @@ public class DiscogsService {
                 try {
                     Optional<String> byCode = apiClient.searchByBarcode(barcode);
                     if (byCode.isPresent()) {
-                        cacheStore.rememberResult(cacheKey, byCode.get(), barcode);
-                        return byCode;
+                        DiscogsMatch match = new DiscogsMatch(
+                                byCode.get(), "EXACT_RELEASE", "HIGH", "BARCODE",
+                                "Discogs returned a release for the album barcode.", false);
+                        cacheStore.rememberResult(cacheKey, match, barcode);
+                        return Optional.of(match);
                     }
                 } catch (Exception e) {
                     log.debug("Discogs barcode lookup failed: {}", e.getMessage());
@@ -121,7 +165,7 @@ public class DiscogsService {
             }
         }
 
-        Optional<String> cached = cacheStore.peekCachedUri(origArtist, origAlbum, year, null);
+        Optional<DiscogsMatch> cached = cacheStore.peekCachedMatch(origArtist, origAlbum, year, null);
         if (cached.isPresent() && isCacheFinalResult(cached.get())) {
             return cached;
         }
@@ -133,8 +177,9 @@ public class DiscogsService {
                     origAlbum,
                     year
             );
-            cacheStore.rememberResult(cacheKey, fallback, barcode);
-            return Optional.of(fallback);
+            DiscogsMatch match = searchOnlyMatch(fallback, "No Discogs API token is configured; open the search results and choose a release.");
+            cacheStore.rememberResult(cacheKey, match, barcode);
+            return Optional.of(match);
         }
 
         int attempt = 0;
@@ -148,8 +193,9 @@ public class DiscogsService {
                 String q1 = ((artistStrict != null) ? artistStrict : "") + " " + ((origAlbum != null) ? origAlbum : "");
                 result = apiClient.searchOnceQ(q1, year, artistStrict, origAlbum);
                 if (result.isPresent()) {
-                    cacheStore.rememberResult(cacheKey, result.get(), barcode);
-                    return result;
+                    DiscogsMatch match = exactCatalogMatch(result.get(), "Discogs matched the normalized artist, album, and year.");
+                    cacheStore.rememberResult(cacheKey, match, barcode);
+                    return Optional.of(match);
                 }
 
                 // Pass B: free-text q search (lightly normalized album)
@@ -157,26 +203,40 @@ public class DiscogsService {
                 String q2 = ((artistStrict != null) ? artistStrict : "") + " " + ((lightAlbum != null) ? lightAlbum : "");
                 result = apiClient.searchOnceQ(q2, year, artistStrict, origAlbum);
                 if (result.isPresent()) {
-                    cacheStore.rememberResult(cacheKey, result.get(), barcode);
-                    return result;
+                    DiscogsMatch match = exactCatalogMatch(result.get(), "Discogs matched the artist and a normalized album title.");
+                    cacheStore.rememberResult(cacheKey, match, barcode);
+                    return Optional.of(match);
                 }
 
                 // Structured fallbacks (master preferred)
                 result = apiClient.searchOnce(artistStrict, origAlbum, year, origTrack, true);
-                if (result.isPresent()) { cacheStore.rememberResult(cacheKey, result.get(), barcode); return result; }
+                if (result.isPresent()) {
+                    DiscogsMatch match = likelyMatch(result.get(), "Discogs matched artist, album, year, and track metadata.");
+                    cacheStore.rememberResult(cacheKey, match, barcode); return Optional.of(match);
+                }
 
                 result = apiClient.searchOnce(artistStrict, origAlbum, year, origTrack, false);
-                if (result.isPresent()) { cacheStore.rememberResult(cacheKey, result.get(), barcode); return result; }
+                if (result.isPresent()) {
+                    DiscogsMatch match = likelyMatch(result.get(), "Discogs matched artist, album, year, and track metadata.");
+                    cacheStore.rememberResult(cacheKey, match, barcode); return Optional.of(match);
+                }
 
                 result = apiClient.searchOnce(artistStrict, origAlbum, null, origTrack, true);
-                if (result.isPresent()) { cacheStore.rememberResult(cacheKey, result.get(), barcode); return result; }
+                if (result.isPresent()) {
+                    DiscogsMatch match = likelyMatch(result.get(), "Discogs matched artist, album, and track metadata without a year constraint.");
+                    cacheStore.rememberResult(cacheKey, match, barcode); return Optional.of(match);
+                }
 
                 result = apiClient.searchOnce(artistStrict, origAlbum, null, origTrack, false);
-                if (result.isPresent()) { cacheStore.rememberResult(cacheKey, result.get(), barcode); return result; }
+                if (result.isPresent()) {
+                    DiscogsMatch match = likelyMatch(result.get(), "Discogs matched artist, album, and track metadata without a year constraint.");
+                    cacheStore.rememberResult(cacheKey, match, barcode); return Optional.of(match);
+                }
 
                 String fallback = DiscogsUrlUtils.buildWebSearchUrl(artistStrict, origAlbum, year);
-                cacheStore.rememberResult(cacheKey, fallback, barcode);
-                return Optional.of(fallback);
+                DiscogsMatch match = searchOnlyMatch(fallback, "No reliable Discogs entry was found; review the search results manually.");
+                cacheStore.rememberResult(cacheKey, match, barcode);
+                return Optional.of(match);
             } catch (Exception e) {
                 boolean transientError = isTransientDiscogsError(e);
                 if (transientError && attempt < TRANSIENT_RETRY_LIMIT) {
@@ -192,12 +252,32 @@ public class DiscogsService {
                 );
 
                 if (!transientError) {
-                    cacheStore.rememberResult(cacheKey, fallback, barcode);
+                    cacheStore.rememberResult(cacheKey, searchOnlyMatch(fallback,
+                            "The Discogs lookup failed; review the search results manually."), barcode);
                 } else {
                     log.debug("Discogs transient error for {} after {} retries; returning uncached fallback", cacheKey, attempt);
                 }
-                return Optional.of(fallback);
+                return Optional.of(searchOnlyMatch(fallback, transientError
+                        ? "Discogs is temporarily unavailable; review the search results manually."
+                        : "The Discogs lookup failed; review the search results manually."));
             }
+        }
+    }
+
+    public static Map<String, Integer> providerStatus() {
+        return Map.of(
+            "active", ACTIVE_PROVIDER_CALLS.get(),
+            "limit", MAX_PROVIDER_CONCURRENCY,
+            "waiting", PROVIDER_PERMITS.getQueueLength()
+        );
+    }
+
+    private static int envInt(String name, int fallback) {
+        try {
+            String raw = System.getenv(name);
+            return raw == null || raw.isBlank() ? fallback : Math.max(1, Integer.parseInt(raw));
+        } catch (Exception ignored) {
+            return fallback;
         }
     }
 
@@ -295,7 +375,45 @@ public class DiscogsService {
         return !isSearchFallbackUrl(url);
     }
 
+    boolean isCacheFinalResult(DiscogsMatch match) {
+        if (match == null || !isCacheFinalResult(match.url())) {
+            return false;
+        }
+        // URL-only cache entries predate provenance and must be rechecked when the API is available.
+        return !apiClient.isConfigured() || !"LEGACY_CACHE".equalsIgnoreCase(match.source());
+    }
+
     private static boolean isSearchFallbackUrl(String url) {
         return url != null && url.toLowerCase().contains("/search");
+    }
+
+    private static DiscogsMatch curatedMatch(String url) {
+        return new DiscogsMatch(
+                url,
+                url != null && url.toLowerCase().contains("/master/") ? "EXACT_MASTER" : "EXACT_RELEASE",
+                "HIGH",
+                "MANUAL_CURATION",
+                "A VinylMatch curator selected this Discogs entry.",
+                false
+        );
+    }
+
+    private static DiscogsMatch exactCatalogMatch(String url, String reason) {
+        return new DiscogsMatch(
+                url,
+                url != null && url.toLowerCase().contains("/master/") ? "EXACT_MASTER" : "EXACT_RELEASE",
+                "HIGH",
+                "DISCOGS_CATALOG",
+                reason,
+                false
+        );
+    }
+
+    private static DiscogsMatch likelyMatch(String url, String reason) {
+        return new DiscogsMatch(url, "LIKELY_MATCH", "MEDIUM", "DISCOGS_CATALOG", reason, false);
+    }
+
+    private static DiscogsMatch searchOnlyMatch(String url, String reason) {
+        return new DiscogsMatch(url, "SEARCH_ONLY", "LOW", "DISCOGS_SEARCH", reason, false);
     }
 }

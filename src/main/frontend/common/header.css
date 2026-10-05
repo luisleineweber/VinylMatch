@@ -177,6 +177,36 @@
     color: #ffffff;
 }
 
+.auth-status {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 20px;
+    width: min(390px, calc(100vw - 28px));
+    margin: 0;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-default, rgba(49, 47, 44, 0.16));
+    border-radius: 10px;
+    background: var(--bg-primary, #fafafa);
+    color: var(--text-primary, #312f2c);
+    box-shadow: 0 8px 24px rgba(49, 47, 44, 0.14);
+    font-family: var(--font-body, system-ui);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.auth-status[hidden] {
+    display: none;
+}
+
+.auth-status-success {
+    border-color: rgba(31, 122, 63, 0.45);
+}
+
+.auth-status-error {
+    border-color: rgba(178, 51, 51, 0.52);
+}
+
 /* 640px — single row, slightly tighter, nav-left stays visible */
 @media (max-width: 640px) {
     #header {
@@ -270,5 +300,9 @@
 
     .spotify-btn {
         padding: 7px 12px;
+    }
+
+    .auth-status {
+        right: 14px;
     }
 }

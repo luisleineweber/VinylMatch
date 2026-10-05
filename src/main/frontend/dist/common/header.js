@@ -1,3 +1,19 @@
+export function isTrustedSpotifyAuthCallbackMessage(messageEvent, expectedOrigin, popup) {
+    return messageEvent?.origin === expectedOrigin
+        && messageEvent?.source === popup
+        && messageEvent?.data?.type === "spotify-auth-callback";
+}
+
+export function spotifyAuthPollFailure(popupClosed, elapsedMs, timeoutMs = 120000) {
+    if (elapsedMs >= timeoutMs) {
+        return { code: "spotify_login_timeout", message: "Spotify login timed out. Start the login again." };
+    }
+    if (popupClosed) {
+        return { code: "spotify_popup_closed", message: "The Spotify login window was closed before login completed. Please try again." };
+    }
+    return null;
+}
+
 export async function injectHeader() {
     const container = document.getElementById("header");
     if (!container)
@@ -66,6 +82,32 @@ export async function injectHeader() {
             throw new Error("HTTP " + res.status);
         container.innerHTML = await res.text();
         initThemeToggle();
+        const authStatus = container.querySelector("#spotify-auth-status");
+        const setAuthStatus = (message, tone = "info") => {
+            if (!(authStatus instanceof HTMLElement))
+                return;
+            authStatus.textContent = message || "";
+            authStatus.className = `auth-status auth-status-${tone}`;
+            authStatus.hidden = !message;
+        };
+        const emitAuthError = (code, message) => {
+            setAuthStatus(message, "error");
+            window.dispatchEvent(new CustomEvent("vm:auth-error", {
+                detail: { code, message }
+            }));
+        };
+        const readApiError = async (response) => {
+            try {
+                const payload = await response.json();
+                return {
+                    code: payload?.error?.code || "auth_login_failed",
+                    message: payload?.error?.message || "Login could not be started. Please try again."
+                };
+            }
+            catch (_a) {
+                return { code: "auth_login_failed", message: "Login could not be started. Please try again." };
+            }
+        };
         // Aktiver Link markieren
         const rawPath = (location.pathname || "/").toLowerCase().replace(/\/+$/, "") || "/";
         const path = rawPath === "/" || rawPath.endsWith("/home.html")
@@ -114,40 +156,111 @@ export async function injectHeader() {
                             const r = await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
                             if (!r.ok && r.status !== 204)
                                 throw new Error("HTTP " + r.status);
+                            setAuthStatus("You are logged out of Spotify.", "info");
                         }
                         catch (_a) {
+                            emitAuthError("spotify_logout_failed", "Spotify logout failed. Please try again.");
+                            return;
                         }
                         updateSpotifyButton(false, false);
                     }
                     else {
+                        let popup;
                         try {
+                            setAuthStatus("Opening Spotify login…", "info");
+                            popup = window.open("about:blank", "spotify-oauth", "popup,width=520,height=720");
+                            if (!popup) {
+                                emitAuthError("spotify_popup_blocked", "Your browser blocked the Spotify login window. Allow popups for this site and try again.");
+                                return;
+                            }
                             const r = await fetch("/api/auth/login", { method: "POST", credentials: "include" });
-                            if (!r.ok)
-                                throw new Error("HTTP " + r.status);
+                            if (!r.ok) {
+                                const apiError = await readApiError(r);
+                                popup.close();
+                                emitAuthError(apiError.code, apiError.message);
+                                return;
+                            }
                             const data = await r.json();
                             const url = data?.authorizeUrl;
-                            if (url) {
-                                window.open(url, "_blank");
-                                const start = Date.now();
-                                const poll = setInterval(async () => {
-                                    const statusRes = await fetch("/api/auth/status", { cache: "no-cache", credentials: "include" });
-                                    if (statusRes.ok) {
-                                        const statusData = await statusRes.json();
-                                        if (statusData?.loggedIn) {
-                                            updateSpotifyButton(true, statusData?.isAdmin === true);
-                                            clearInterval(poll);
-                                        }
-                                    }
-                                    if (Date.now() - start > 120000)
-                                        clearInterval(poll);
-                                }, 1500);
+                            if (typeof url !== "string" || !url) {
+                                popup.close();
+                                emitAuthError("spotify_authorize_url_missing", "Spotify did not provide a login link. Please try again.");
+                                return;
                             }
+                            popup.location.href = url;
+                            setAuthStatus("Finish the login in the Spotify window.", "info");
+                            const startedAt = Date.now();
+                            let settled = false;
+                            let pollTimer;
+                            const cleanup = () => {
+                                settled = true;
+                                if (pollTimer)
+                                    clearTimeout(pollTimer);
+                                window.removeEventListener("message", onCallbackMessage);
+                            };
+                            const fail = (code, message) => {
+                                if (settled)
+                                    return;
+                                cleanup();
+                                emitAuthError(code, message);
+                            };
+                            const finishFromStatus = async () => {
+                                let statusRes;
+                                try {
+                                    statusRes = await fetch("/api/auth/status", { cache: "no-cache", credentials: "include" });
+                                }
+                                catch (_a) {
+                                    fail("spotify_status_failed", "VinylMatch could not confirm the Spotify login. Check your connection and try again.");
+                                    return true;
+                                }
+                                if (!statusRes.ok) {
+                                    fail("spotify_status_failed", "VinylMatch could not confirm the Spotify login. Please try again.");
+                                    return true;
+                                }
+                                const statusData = await statusRes.json().catch(() => null);
+                                if (typeof statusData?.loggedIn !== "boolean") {
+                                    fail("spotify_status_invalid", "VinylMatch received an invalid login status. Please try again.");
+                                    return true;
+                                }
+                                if (statusData.loggedIn) {
+                                    cleanup();
+                                    setAuthStatus("Spotify connected successfully.", "success");
+                                    updateSpotifyButton(true, statusData?.isAdmin === true);
+                                    return true;
+                                }
+                                return false;
+                            };
+                            const onCallbackMessage = async (messageEvent) => {
+                                if (!isTrustedSpotifyAuthCallbackMessage(messageEvent, window.location.origin, popup))
+                                    return;
+                                const payload = messageEvent.data;
+                                if (payload.success) {
+                                    await finishFromStatus();
+                                }
+                                else {
+                                    fail(typeof payload.code === "string" ? payload.code : "spotify_callback_failed", typeof payload.message === "string" ? payload.message : "Spotify login failed. Please try again.");
+                                }
+                            };
+                            window.addEventListener("message", onCallbackMessage);
+                            const poll = async () => {
+                                if (settled)
+                                    return;
+                                const pollFailure = spotifyAuthPollFailure(popup.closed, Date.now() - startedAt);
+                                if (pollFailure) {
+                                    fail(pollFailure.code, pollFailure.message);
+                                    return;
+                                }
+                                if (await finishFromStatus())
+                                    return;
+                                pollTimer = setTimeout(poll, 1500);
+                            };
+                            pollTimer = setTimeout(poll, 1500);
                         }
                         catch (e) {
+                            if (popup && !popup.closed)
+                                popup.close();
                             console.warn("Login could not be started", e);
-                            window.dispatchEvent(new CustomEvent("vm:auth-error", {
-                                detail: { message: "Login could not be started. Please try again." }
-                            }));
+                            emitAuthError("auth_login_failed", "Login could not be started. Please try again.");
                         }
                     }
                 });

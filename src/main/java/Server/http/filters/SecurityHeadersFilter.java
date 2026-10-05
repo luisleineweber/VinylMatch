@@ -24,8 +24,8 @@ public class SecurityHeadersFilter extends Filter {
     // CSP Directives
     private static final String CSP_DIRECTIVES = 
         "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' https://*.spotify.com https://*.discogs.com; " +
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "script-src 'self'; " +
+        "style-src 'self' https://fonts.googleapis.com; " +
         "img-src 'self' data: https: blob:; " +
         "font-src 'self' https://fonts.gstatic.com; " +
         "connect-src 'self' https://*.spotify.com https://api.discogs.com; " +

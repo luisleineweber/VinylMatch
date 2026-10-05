@@ -1,20 +1,27 @@
 package Server.routes;
 
 import Server.auth.DiscogsOAuthService;
+import Server.DiscogsServiceRegistry;
 import Server.http.HttpUtils;
+import Server.http.OAuthCallbackPage;
 import Server.http.ApiFilters;
 import Server.http.filters.AdminOnlyFilter;
 import Server.session.DiscogsSession;
 import Server.session.DiscogsSessionStore;
 import Server.session.SpotifySessionStore;
+import Server.session.SpotifySession;
 import com.hctamlyniv.DiscogsService;
 import com.hctamlyniv.Config;
 import com.hctamlyniv.curation.CuratedLinkStore;
+import com.hctamlyniv.curation.CurationAuditContext;
+import com.hctamlyniv.curation.CurationVersionConflictException;
+import com.hctamlyniv.curation.CurationVersionNotFoundException;
 import com.hctamlyniv.curation.RedisCuratedLinkStore;
 import com.hctamlyniv.discogs.model.CurationCandidate;
 import com.hctamlyniv.discogs.JevCandidateRanker;
 import com.hctamlyniv.discogs.model.CuratedLink;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
+import com.hctamlyniv.discogs.model.DiscogsMatch;
 import com.hctamlyniv.discogs.model.LibraryFlags;
 import com.hctamlyniv.discogs.model.WishlistResult;
 import com.sun.net.httpserver.HttpExchange;
@@ -23,17 +30,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -48,9 +52,9 @@ public class DiscogsRoutes {
     private final SpotifySessionStore spotifySessionStore;
     private final DiscogsOAuthService oauthService;
     private final CuratedLinkStore curatedLinkStore;
+    private final DiscogsServiceRegistry serviceCache = new DiscogsServiceRegistry();
     private final JevCandidateRanker jevCandidateRanker;
     private final boolean jevCandidateMatchingEnabled;
-    private final Map<String, DiscogsService> serviceCache = new ConcurrentHashMap<>();
 
     public DiscogsRoutes(Supplier<DiscogsService> defaultDiscogsSupplier, DiscogsSessionStore sessionStore, SpotifySessionStore spotifySessionStore) {
         this(defaultDiscogsSupplier, sessionStore, spotifySessionStore,
@@ -110,6 +114,12 @@ public class DiscogsRoutes {
         server.createContext("/api/discogs/curation/save", this::handleCurationSave).getFilters().addAll(
             java.util.List.of(ApiFilters.securityHeaders(), ApiFilters.rateLimiting(), adminFilter)
         );
+        server.createContext("/api/discogs/curation/history", this::handleCurationHistory).getFilters().addAll(
+            java.util.List.of(ApiFilters.securityHeaders(), ApiFilters.rateLimiting(), adminFilter)
+        );
+        server.createContext("/api/discogs/curation/rollback", this::handleCurationRollback).getFilters().addAll(
+            java.util.List.of(ApiFilters.securityHeaders(), ApiFilters.rateLimiting(), adminFilter)
+        );
     }
 
     // =========================================================================
@@ -135,7 +145,7 @@ public class DiscogsRoutes {
             DiscogsService discogs = resolveDiscogsService(exchange);
 
             List<Map<String, Object>> results = new ArrayList<>();
-            Map<String, Optional<String>> requestLookupCache = new HashMap<>();
+            Map<String, Optional<DiscogsMatch>> requestLookupCache = new HashMap<>();
             for (Object entry : tracksList) {
                 if (!(entry instanceof Map<?, ?> track)) {
                     continue;
@@ -154,30 +164,44 @@ public class DiscogsRoutes {
 
                 if (artist == null || album == null) {
                     resultEntry.put("url", null);
+                    resultEntry.put("matchType", "MANUAL_REVIEW");
+                    resultEntry.put("confidence", "NONE");
+                    resultEntry.put("source", "REQUEST");
+                    resultEntry.put("reason", "Artist and album metadata are required for matching.");
+                    resultEntry.put("vinylFormatConfirmed", false);
                     resultEntry.put("cacheHit", false);
                     results.add(resultEntry);
                     continue;
                 }
 
                 String lookupKey = buildBatchLookupKey(artist, album, year, barcode);
-                Optional<String> urlOpt;
+                Optional<DiscogsMatch> matchOpt;
                 boolean cacheHit;
                 if (lookupKey != null && requestLookupCache.containsKey(lookupKey)) {
-                    urlOpt = requestLookupCache.get(lookupKey);
+                    matchOpt = requestLookupCache.get(lookupKey);
                     cacheHit = true;
                 } else {
-                    Optional<String> cached = discogs.peekCachedUri(artist, album, year, barcode);
-                    urlOpt = discogs.findAlbumUri(artist, album, year, trackTitle, barcode);
+                    Optional<DiscogsMatch> cached = discogs.peekCachedMatch(artist, album, year, barcode);
+                    matchOpt = discogs.findAlbumMatch(artist, album, year, trackTitle, barcode);
                     cacheHit = cached.isPresent()
-                            && urlOpt.isPresent()
-                            && cached.get().equals(urlOpt.get());
+                            && matchOpt.isPresent()
+                            && cached.get().equals(matchOpt.get());
                     if (lookupKey != null) {
-                        requestLookupCache.put(lookupKey, urlOpt);
+                        requestLookupCache.put(lookupKey, matchOpt);
                     }
                 }
 
                 resultEntry.put("cacheHit", cacheHit);
-                resultEntry.put("url", urlOpt.orElse(null));
+                if (matchOpt.isPresent()) {
+                    resultEntry.putAll(matchOpt.get().asMap());
+                } else {
+                    resultEntry.put("url", null);
+                    resultEntry.put("matchType", "MANUAL_REVIEW");
+                    resultEntry.put("confidence", "NONE");
+                    resultEntry.put("source", "DISCOGS_CATALOG");
+                    resultEntry.put("reason", "No Discogs result was found.");
+                    resultEntry.put("vinylFormatConfirmed", false);
+                }
                 results.add(resultEntry);
             }
 
@@ -216,13 +240,13 @@ public class DiscogsRoutes {
 
             DiscogsService discogs = resolveDiscogsService(exchange);
 
-            Optional<String> urlOpt = discogs.findAlbumUri(artist, album, year, trackTitle);
-            if (urlOpt.isEmpty()) {
+            Optional<DiscogsMatch> matchOpt = discogs.findAlbumMatch(artist, album, year, trackTitle, null);
+            if (matchOpt.isEmpty()) {
                 HttpUtils.sendApiError(exchange, 404, "not_found", "No Discogs match found");
                 return;
             }
 
-            HttpUtils.sendJson(exchange, 200, Map.of("url", urlOpt.get()));
+            HttpUtils.sendJson(exchange, 200, matchOpt.get().asMap());
         } catch (HttpUtils.RequestTooLargeException e) {
             HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
         } catch (Exception e) {
@@ -405,6 +429,10 @@ public class DiscogsRoutes {
                 return;
             }
 
+            DiscogsSession current = sessionStore.getSession(exchange);
+            if (current != null) {
+                serviceCache.invalidate(current.token(), current.tokenSecret(), current.userAgent());
+            }
             sessionStore.destroySession(exchange);
             HttpUtils.sendNoContent(exchange);
         } catch (Exception e) {
@@ -607,12 +635,14 @@ public class DiscogsRoutes {
 
             List<CurationCandidate> candidates = discogs.fetchCurationCandidates(
                     artist, album, year, trackTitle, 4);
+            long curationVersion = curatedLinkStore.find(CuratedLinkStore.normalizeKey(artist, album, year))
+                    .map(CuratedLink::version).orElse(0L);
             if (jevCandidateMatchingEnabled) {
                 JevCandidateRanker.Ranking ranking = jevCandidateRanker.rank(
                         artist, album, year, trackTitle, candidates);
-                HttpUtils.sendJson(exchange, 200, Map.of("candidates", ranking.candidates(), "jev", ranking.jev()));
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", ranking.candidates(), "jev", ranking.jev(), "curationVersion", curationVersion));
             } else {
-                HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates));
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates, "curationVersion", curationVersion));
             }
         } catch (HttpUtils.RequestTooLargeException e) {
             HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
@@ -639,6 +669,17 @@ public class DiscogsRoutes {
             String barcode = HttpUtils.stringValue(payload.get("barcode"));
             String url = HttpUtils.stringValue(payload.get("url"));
             String thumb = HttpUtils.stringValue(payload.get("thumb"));
+            Integer expectedVersion = HttpUtils.intValue(payload.get("expectedVersion"));
+            String reason = HttpUtils.stringValue(payload.get("reason"));
+
+            if (expectedVersion == null || expectedVersion < 0) {
+                HttpUtils.sendApiError(exchange, 400, "invalid_expected_version", "expectedVersion must be zero or positive");
+                return;
+            }
+            if (reason == null) {
+                HttpUtils.sendApiError(exchange, 400, "missing_reason", "A change reason is required");
+                return;
+            }
 
             if (!HttpUtils.isDiscogsWebUrl(url)) {
                 HttpUtils.sendApiError(exchange, 400, "invalid_url", "Parameter 'url' is required and must be a valid Discogs URL");
@@ -663,16 +704,75 @@ public class DiscogsRoutes {
                 "manual"
             );
             
-            curatedLinkStore.save(link);
+            CuratedLink saved = curatedLinkStore.save(link, expectedVersion, auditContext(exchange, reason));
             
             log.info("Saved curated link: {} -> {}", normalizedKey, safeUrl);
-            HttpUtils.sendJson(exchange, 200, Map.of("saved", true, "cacheKey", normalizedKey, "entry", link));
+            HttpUtils.sendJson(exchange, 200, Map.of("saved", true, "cacheKey", normalizedKey, "entry", saved));
         } catch (HttpUtils.RequestTooLargeException e) {
             HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
+        } catch (CurationVersionConflictException e) {
+            HttpUtils.sendApiError(exchange, 409, "curation_version_conflict", e.getMessage());
         } catch (Exception e) {
             log.warn("Discogs curation save failed: {}", e.getMessage());
             HttpUtils.sendApiError(exchange, 500, "discogs_curation_save_failed", "Failed to save curated link");
         }
+    }
+
+    private void handleCurationHistory(HttpExchange exchange) throws IOException {
+        try {
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                HttpUtils.sendApiError(exchange, 405, "method_not_allowed", "Only GET is supported");
+                return;
+            }
+            String cacheKey = HttpUtils.parseQueryParams(exchange.getRequestURI().getRawQuery()).get("cacheKey");
+            if (cacheKey == null || cacheKey.isBlank()) {
+                HttpUtils.sendApiError(exchange, 400, "missing_cache_key", "cacheKey is required");
+                return;
+            }
+            HttpUtils.sendJson(exchange, 200, Map.of("cacheKey", cacheKey, "history", curatedLinkStore.history(cacheKey)));
+        } catch (Exception e) {
+            log.warn("Curation history failed: {}", e.getMessage());
+            HttpUtils.sendApiError(exchange, 500, "curation_history_failed", "Failed to load curation history");
+        }
+    }
+
+    private void handleCurationRollback(HttpExchange exchange) throws IOException {
+        try {
+            if (HttpUtils.handleCorsPreflightIfNeeded(exchange)) return;
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                HttpUtils.sendApiError(exchange, 405, "method_not_allowed", "Only POST is supported");
+                return;
+            }
+            Map<?, ?> payload = HttpUtils.getMapper().readValue(HttpUtils.readRequestBody(exchange), Map.class);
+            String cacheKey = HttpUtils.stringValue(payload.get("cacheKey"));
+            Integer targetVersion = HttpUtils.intValue(payload.get("targetVersion"));
+            Integer expectedVersion = HttpUtils.intValue(payload.get("expectedVersion"));
+            String reason = HttpUtils.stringValue(payload.get("reason"));
+            if (cacheKey == null || targetVersion == null || targetVersion < 1
+                    || expectedVersion == null || expectedVersion < 1 || reason == null) {
+                HttpUtils.sendApiError(exchange, 400, "invalid_rollback", "cacheKey, targetVersion, expectedVersion and reason are required");
+                return;
+            }
+            CuratedLink restored = curatedLinkStore.rollback(
+                    cacheKey, targetVersion, expectedVersion, auditContext(exchange, reason));
+            HttpUtils.sendJson(exchange, 200, Map.of("rolledBack", true, "entry", restored));
+        } catch (HttpUtils.RequestTooLargeException e) {
+            HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
+        } catch (CurationVersionConflictException e) {
+            HttpUtils.sendApiError(exchange, 409, "curation_version_conflict", e.getMessage());
+        } catch (CurationVersionNotFoundException e) {
+            HttpUtils.sendApiError(exchange, 404, "curation_version_not_found", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Curation rollback failed: {}", e.getMessage());
+            HttpUtils.sendApiError(exchange, 500, "curation_rollback_failed", "Failed to roll back curation");
+        }
+    }
+
+    private CurationAuditContext auditContext(HttpExchange exchange, String reason) {
+        SpotifySession spotifySession = spotifySessionStore.getSession(exchange);
+        String actor = spotifySession == null ? null : spotifySession.getUserId();
+        String correlationId = exchange.getResponseHeaders().getFirst("X-Correlation-Id");
+        return new CurationAuditContext(actor, reason, correlationId);
     }
 
     // =========================================================================
@@ -697,11 +797,10 @@ public class DiscogsRoutes {
         }
         String ua = (userAgent == null || userAgent.isBlank()) ? "VinylMatch/1.0" : userAgent;
         String secretKey = (tokenSecret == null || tokenSecret.isBlank()) ? "" : tokenSecret;
-        String key = token + "|" + secretKey + "|" + ua;
         if (secretKey.isBlank()) {
-            return serviceCache.computeIfAbsent(key, k -> new DiscogsService(token, ua));
+            return serviceCache.get(token, null, ua, () -> new DiscogsService(token, ua));
         }
-        return serviceCache.computeIfAbsent(key, k -> new DiscogsService(
+        return serviceCache.get(token, secretKey, ua, () -> new DiscogsService(
                 token,
                 secretKey,
                 ua,
@@ -747,88 +846,8 @@ public class DiscogsRoutes {
     }
 
     private void sendOAuthCallbackHtml(HttpExchange exchange, boolean success, String message) throws IOException {
-        String status = success ? "Discogs Login Successful" : "Discogs Login Failed";
-        String color = success ? "#1f7a3f" : "#b23333";
-        String action = success ? "Closing window..." : "You can close this window.";
-        String safeMessage = escapeHtml(message);
-
-        String html = """
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>%s</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; background: #f5f2eb; margin: 0; min-height: 100vh; display: grid; place-items: center; }
-                        .card { width: min(440px, 92vw); background: #fff; border: 2px solid #111; padding: 28px; }
-                        h1 { margin: 0 0 10px; font-size: 24px; color: %s; }
-                        p { margin: 8px 0; color: #1b1b1b; line-height: 1.5; }
-                        .muted { color: #555; font-size: 14px; }
-                    </style>
-                </head>
-                <body>
-                    <main class="card" data-callback-message="%s">
-                        <h1>%s</h1>
-                        <p>%s</p>
-                        <p class="muted">%s</p>
-                    </main>
-                    <script>
-                        (function() {
-                            var success = %s;
-                            var payload = { type: 'discogs-auth-callback', success: success };
-                            var card = document.querySelector('[data-callback-message]');
-                            if (card && !success) {
-                                var callbackMessage = card.getAttribute('data-callback-message');
-                                if (callbackMessage) {
-                                    payload.message = callbackMessage;
-                                }
-                            }
-
-                            if (window.opener) {
-                                window.opener.postMessage(payload, window.location.origin);
-                            }
-
-                            if (success) {
-                                setTimeout(function () {
-                                    window.close();
-                                    if (!window.closed) {
-                                        window.location.href = '/playlist.html';
-                                    }
-                                }, 600);
-                            }
-                        }());
-                    </script>
-                </body>
-                </html>
-                """.formatted(
-                status,
-                color,
-                safeMessage,
-                status,
-                safeMessage,
-                action,
-                success
-        );
-
-        byte[] body = html.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-        exchange.sendResponseHeaders(200, body.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-        }
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        OAuthCallbackPage.send(exchange, OAuthCallbackPage.Provider.DISCOGS, success,
+                success ? "discogs_connected" : "discogs_callback_failed", message);
     }
 
     private Integer parseYear(Object value) {

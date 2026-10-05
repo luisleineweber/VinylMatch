@@ -240,12 +240,7 @@ public final class HttpUtils {
     // =========================================================================
 
     public static boolean isSecureRequest(HttpExchange exchange) {
-        String proto = exchange.getRequestHeaders().getFirst("X-Forwarded-Proto");
-        if (proto != null && proto.equalsIgnoreCase("https")) {
-            return true;
-        }
-        String origin = exchange.getRequestHeaders().getFirst("Origin");
-        return origin != null && origin.toLowerCase().startsWith("https");
+        return ForwardedRequestResolver.isSecure(exchange);
     }
 
     public static boolean isDiscogsWebUrl(String url) {

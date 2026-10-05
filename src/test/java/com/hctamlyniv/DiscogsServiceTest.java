@@ -1,6 +1,7 @@
 package com.hctamlyniv;
 
 import com.hctamlyniv.discogs.model.CuratedLink;
+import com.hctamlyniv.discogs.model.DiscogsMatch;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,6 +32,10 @@ class DiscogsServiceTest {
                 "https://www.discogs.com/release/123-test",
                 service.findAlbumUri("Daft Punk", "Discovery", 2001, "One More Time", "barcode-1").orElse(null)
         );
+        DiscogsMatch match = service.findAlbumMatch("Daft Punk", "Discovery", 2001, "One More Time", "barcode-1").orElseThrow();
+        assertEquals("EXACT_RELEASE", match.matchType());
+        assertEquals("HIGH", match.confidence());
+        assertEquals("MANUAL_CURATION", match.source());
     }
 
     @Test
@@ -39,6 +44,10 @@ class DiscogsServiceTest {
         String url = service.findAlbumUri("Daft Punk", "Discovery", 2001).orElse(null);
         assertNotNull(url);
         assertTrue(url.contains("discogs.com/search"));
+        DiscogsMatch match = service.findAlbumMatch("Daft Punk", "Discovery", 2001, null, null).orElseThrow();
+        assertEquals("SEARCH_ONLY", match.matchType());
+        assertEquals("LOW", match.confidence());
+        assertFalse(match.reason().isBlank());
     }
 
     @Test
@@ -59,6 +68,23 @@ class DiscogsServiceTest {
         assertNotNull(first);
         String second = service.findAlbumUri("AC/DC", "Back In Black", 1980).orElse(null);
         assertEquals(first, second);
+    }
+
+    @Test
+    void rechecksLegacyCacheEntriesWhenDiscogsApiIsConfigured() {
+        DiscogsService service = new DiscogsService("token", "VinylMatch/Test", tempDir);
+        DiscogsMatch legacy = DiscogsMatch.legacyCache("https://www.discogs.com/release/99-test");
+        DiscogsMatch verified = new DiscogsMatch(
+                "https://www.discogs.com/release/100-test",
+                "EXACT_RELEASE",
+                "HIGH",
+                "DISCOGS_CATALOG",
+                "Verified catalog match.",
+                false
+        );
+
+        assertFalse(service.isCacheFinalResult(legacy));
+        assertTrue(service.isCacheFinalResult(verified));
     }
 
     @Test

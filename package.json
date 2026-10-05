@@ -1,0 +1,13 @@
+{
+  "name": "vinylmatch-browser-gates",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:frontend": "node --test src/test/frontend/*.test.mjs",
+    "test:e2e": "playwright test",
+    "check:frontend": "node scripts/check-frontend-assets.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

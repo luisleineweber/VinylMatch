@@ -4,7 +4,7 @@
  */
 
 import { initCurationPanel } from "./curation.js";
-import { getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
+import { fetchWithTimeout, getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
 import { buildCurationQueue, normalizeForSearch, primaryArtist } from "./common/playlist-utils.js";
 import { readCachedPlaylist, storePlaylistChunk } from "./storage.js";
 import { loadCustomVendors } from "./common/vendors.js";
@@ -177,12 +177,25 @@ function updateSubtitle(aggregated) {
     if (!subtitle) return;
     const total = aggregated?.totalTracks ?? aggregated?.tracks?.filter(Boolean).length ?? 0;
     subtitle.textContent = `${total} tracks`;
+    updateLoadSummary(aggregated);
+}
+
+function updateLoadSummary(aggregated) {
+    const detail = document.querySelector("#playlist-header .playlist-load-summary__detail");
+    if (!detail) return;
+    const totalTracks = aggregated?.totalTracks ?? aggregated?.tracks?.filter(Boolean).length ?? 0;
+    const loadedTracks = aggregated?.tracks?.filter(Boolean).length ?? 0;
+    detail.textContent = aggregated?.hasMore
+        ? `${loadedTracks} of ${totalTracks} tracks ready. Discogs matching is a separate step.`
+        : `${loadedTracks} tracks ready. Discogs matching is a separate step.`;
 }
 
 function renderHeader(aggregated) {
     const header = document.getElementById("playlist-header");
     if (!header) return;
     header.textContent = "";
+    const totalTracks = aggregated?.totalTracks ?? aggregated?.tracks?.filter(Boolean).length ?? 0;
+    const loadedTracks = aggregated?.tracks?.filter(Boolean).length ?? 0;
     
     const coverImg = document.createElement("img");
     coverImg.src = aggregated?.playlistCoverUrl || PLACEHOLDER_IMG;
@@ -206,9 +219,28 @@ function renderHeader(aggregated) {
     
     const subtitle = document.createElement("div");
     subtitle.className = "playlist-subtitle";
+
+    const loadSummary = document.createElement("div");
+    loadSummary.className = "playlist-load-summary";
+    const loadMarker = document.createElement("span");
+    loadMarker.className = "playlist-load-summary__marker";
+    loadMarker.setAttribute("aria-hidden", "true");
+    const loadCopy = document.createElement("div");
+    const loadLabel = document.createElement("strong");
+    loadLabel.textContent = "Playlist loaded";
+    const loadDetail = document.createElement("span");
+    loadDetail.textContent = aggregated?.hasMore
+        ? `${loadedTracks} of ${totalTracks} tracks ready. Discogs matching is a separate step.`
+        : `${loadedTracks} tracks ready. Discogs matching is a separate step.`;
+    loadCopy.appendChild(loadLabel);
+    loadDetail.className = "playlist-load-summary__detail";
+    loadCopy.appendChild(loadDetail);
+    loadSummary.appendChild(loadMarker);
+    loadSummary.appendChild(loadCopy);
     
     headerInfo.appendChild(titleDiv);
     headerInfo.appendChild(subtitle);
+    headerInfo.appendChild(loadSummary);
     header.appendChild(coverImg);
     header.appendChild(headerInfo);
     updateSubtitle(aggregated);
@@ -276,7 +308,14 @@ function applyManualDiscogsUrl(item, url) {
             track.discogsStatus = "found";
             const key = buildTrackKey(track, i);
             if (key) discogsState.completed.add(key);
-            markDiscogsResult(key, i, safeUrl, state, (delay) => scheduleLibraryRefresh(delay, state));
+            markDiscogsResult(key, i, {
+                url: safeUrl,
+                matchType: "CURATED_MATCH",
+                confidence: "HIGH",
+                source: "MANUAL_CURATION",
+                reason: "A VinylMatch curator selected this Discogs entry.",
+                vinylFormatConfirmed: false,
+            }, state, (delay) => scheduleLibraryRefresh(delay, state));
         }
     }
     
@@ -309,7 +348,7 @@ function chunkQuery(id, offset, limit) {
     });
 }
 async function requestPlaylistChunk(id, offset, limit) {
-    const response = await fetch(`/api/playlist?${chunkQuery(id, offset, limit).toString()}`, { cache: "no-cache" });
+    const response = await fetchWithTimeout(`/api/playlist?${chunkQuery(id, offset, limit).toString()}`, { cache: "no-cache" });
     if (!response.ok) {
         const apiError = await readApiError(response);
         const message = getPlaylistLoadErrorMessage(response, apiError, `HTTP ${response.status}`);
@@ -429,7 +468,7 @@ async function extractAlbumsFromTracks(tracks) {
     if (!tracks || tracks.length === 0) return [];
     
     try {
-        const response = await fetch("/api/albums/extract", {
+        const response = await fetchWithTimeout("/api/albums/extract", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tracks }),
@@ -494,6 +533,7 @@ async function loadPlaylist(id, pageSize = DEFAULT_PAGE_SIZE) {
     // Initialize view toggle with render function
     initViewToggle(state, renderTracks);
     setupDiscogsPanel(state);
+    showOverlay("Loading playlist…");
     await setupCurationPanel();
     applyViewMode(state.viewMode, state, renderTracks, { rerender: false });
     

@@ -1,5 +1,5 @@
 import { injectHeader } from "./common/header.js";
-import { getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
+import { fetchWithTimeout, getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
 import { loadPlaylist } from "./playlist.js";
 import { readRecents, storePlaylistChunk, readCachedPlaylist } from "./storage.js";
 const PLAYLIST_PAGE_SIZE = 20;
@@ -701,7 +701,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 showGlobalLoading("Loading playlist…");
                 let response;
                 try {
-                    response = await fetch(apiUrl, { cache: "no-cache" });
+                    response = await fetchWithTimeout(apiUrl, { cache: "no-cache" });
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}`);
                     }
@@ -715,7 +715,10 @@ window.addEventListener("DOMContentLoaded", () => {
                     hideGlobalLoading();
                     console.error("Playlist could not be loaded", e);
                     const apiError = await readApiError(response);
-                    const msg = getPlaylistLoadErrorMessage(response, apiError, "Playlist could not be loaded. Please try again later.", "open");
+                    const fallback = e instanceof Error
+                        ? e.message
+                        : "Playlist could not be loaded. Please try again later.";
+                    const msg = getPlaylistLoadErrorMessage(response, apiError, fallback, "open");
                     showHomeStatus(msg, "error");
                 }
                 finally {
@@ -752,7 +755,7 @@ async function loadPlaylistAndNavigate(id, options = {}) {
     let response;
     try {
         const query = `/api/playlist?id=${encodeURIComponent(id)}&limit=${PLAYLIST_PAGE_SIZE}`;
-        response = await fetch(query, { cache: "no-cache" });
+        response = await fetchWithTimeout(query, { cache: "no-cache" });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }

@@ -41,7 +41,10 @@ public class RedisConfig {
         
         // If Redis host is not set and not localhost, skip Redis initialization
         if (host == null || host.isBlank()) {
-            log.info("Redis host not configured, using in-memory session storage");
+            if (isRequired()) {
+                throw new IllegalStateException("Redis is required in production but REDIS_HOST is not configured");
+            }
+            log.info("Redis host not configured; development will use in-memory session storage");
             initialized = true;
             return;
         }
@@ -69,9 +72,12 @@ public class RedisConfig {
             
             initialized = true;
         } catch (Exception e) {
-            log.warn("Failed to initialize Redis connection pool: {}. Falling back to in-memory storage.", e.getMessage());
+            log.warn("Failed to initialize Redis connection pool: {}", e.getMessage());
             jedisPool = null;
             initialized = true;
+            if (isRequired()) {
+                throw new IllegalStateException("Redis is required in production and is unavailable", e);
+            }
         }
     }
     
@@ -112,6 +118,17 @@ public class RedisConfig {
             return "PONG".equals(jedis.ping());
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    public static boolean isRequired() {
+        return "production".equalsIgnoreCase(Config.getEnvironment());
+    }
+
+    /** Prevents a local fallback from silently splitting production session state. */
+    public static void assertFallbackAllowed() {
+        if (isRequired()) {
+            throw new IllegalStateException("Redis unavailable; in-memory fallback is disabled in production");
         }
     }
     
