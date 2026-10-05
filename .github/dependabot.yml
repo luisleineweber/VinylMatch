@@ -7,6 +7,11 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    groups:
+      logback:
+        patterns:
+          - "ch.qos.logback:logback-classic"
+          - "ch.qos.logback:logback-core"
     reviewers:
       - "hctamlyniv"
     labels:

@@ -3,6 +3,7 @@ package Server.routes;
 import Server.auth.DiscogsOAuthService;
 import Server.DiscogsServiceRegistry;
 import Server.http.HttpUtils;
+import Server.http.OAuthCallbackPage;
 import Server.http.ApiFilters;
 import Server.http.filters.AdminOnlyFilter;
 import Server.session.DiscogsSession;
@@ -10,12 +11,14 @@ import Server.session.DiscogsSessionStore;
 import Server.session.SpotifySessionStore;
 import Server.session.SpotifySession;
 import com.hctamlyniv.DiscogsService;
+import com.hctamlyniv.Config;
 import com.hctamlyniv.curation.CuratedLinkStore;
 import com.hctamlyniv.curation.CurationAuditContext;
 import com.hctamlyniv.curation.CurationVersionConflictException;
 import com.hctamlyniv.curation.CurationVersionNotFoundException;
 import com.hctamlyniv.curation.RedisCuratedLinkStore;
 import com.hctamlyniv.discogs.model.CurationCandidate;
+import com.hctamlyniv.discogs.JevCandidateRanker;
 import com.hctamlyniv.discogs.model.CuratedLink;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
 import com.hctamlyniv.discogs.model.DiscogsMatch;
@@ -27,10 +30,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -52,13 +53,24 @@ public class DiscogsRoutes {
     private final DiscogsOAuthService oauthService;
     private final CuratedLinkStore curatedLinkStore;
     private final DiscogsServiceRegistry serviceCache = new DiscogsServiceRegistry();
+    private final JevCandidateRanker jevCandidateRanker;
+    private final boolean jevCandidateMatchingEnabled;
 
     public DiscogsRoutes(Supplier<DiscogsService> defaultDiscogsSupplier, DiscogsSessionStore sessionStore, SpotifySessionStore spotifySessionStore) {
+        this(defaultDiscogsSupplier, sessionStore, spotifySessionStore,
+                Config.isJevCandidateMatchingEnabled(), new JevCandidateRanker(Config.getTypesafeApiKey()));
+    }
+
+    DiscogsRoutes(Supplier<DiscogsService> defaultDiscogsSupplier, DiscogsSessionStore sessionStore,
+                  SpotifySessionStore spotifySessionStore, boolean jevCandidateMatchingEnabled,
+                  JevCandidateRanker jevCandidateRanker) {
         this.defaultDiscogsSupplier = defaultDiscogsSupplier;
         this.sessionStore = sessionStore;
         this.spotifySessionStore = spotifySessionStore;
         this.oauthService = new DiscogsOAuthService();
         this.curatedLinkStore = new RedisCuratedLinkStore(new com.fasterxml.jackson.databind.ObjectMapper());
+        this.jevCandidateMatchingEnabled = jevCandidateMatchingEnabled;
+        this.jevCandidateRanker = jevCandidateRanker;
     }
 
     public void register(HttpServer server) {
@@ -625,7 +637,13 @@ public class DiscogsRoutes {
                     artist, album, year, trackTitle, 4);
             long curationVersion = curatedLinkStore.find(CuratedLinkStore.normalizeKey(artist, album, year))
                     .map(CuratedLink::version).orElse(0L);
-            HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates, "curationVersion", curationVersion));
+            if (jevCandidateMatchingEnabled) {
+                JevCandidateRanker.Ranking ranking = jevCandidateRanker.rank(
+                        artist, album, year, trackTitle, candidates);
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", ranking.candidates(), "jev", ranking.jev(), "curationVersion", curationVersion));
+            } else {
+                HttpUtils.sendJson(exchange, 200, Map.of("candidates", candidates, "curationVersion", curationVersion));
+            }
         } catch (HttpUtils.RequestTooLargeException e) {
             HttpUtils.sendApiError(exchange, 413, "payload_too_large", "Request body too large");
         } catch (Exception e) {
@@ -828,55 +846,8 @@ public class DiscogsRoutes {
     }
 
     private void sendOAuthCallbackHtml(HttpExchange exchange, boolean success, String message) throws IOException {
-        String status = success ? "Discogs Login Successful" : "Discogs Login Failed";
-        String action = success ? "Closing window..." : "You can close this window.";
-        String safeMessage = escapeHtml(message);
-
-        String html = """
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>%s</title>
-                    <link rel="stylesheet" href="/styles/discogs-callback.css">
-                </head>
-                <body>
-                    <main class="card" data-callback-message="%s" data-callback-success="%s">
-                        <h1>%s</h1>
-                        <p>%s</p>
-                        <p class="muted">%s</p>
-                    </main>
-                    <script src="/dist/discogs-callback.js" defer></script>
-                </body>
-                </html>
-                """.formatted(
-                status,
-                safeMessage,
-                success,
-                status,
-                safeMessage,
-                action
-        );
-
-        byte[] body = html.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-        exchange.sendResponseHeaders(200, body.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-        }
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        OAuthCallbackPage.send(exchange, OAuthCallbackPage.Provider.DISCOGS, success,
+                success ? "discogs_connected" : "discogs_callback_failed", message);
     }
 
     private Integer parseYear(Object value) {

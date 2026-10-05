@@ -15,10 +15,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,12 +36,12 @@ class AuthRoutesTest {
         String body = exchange.responseBodyAsString();
         assertEquals(200, exchange.getResponseCode());
         assertTrue(body.contains("<main"));
-        assertTrue(body.contains("id=\"spotify-auth-callback\""));
-        assertTrue(body.contains("data-auth-success=\"false\""));
-        assertTrue(body.contains("data-auth-code=\"spotify_authorization_denied\""));
-        assertTrue(body.contains("data-auth-message=\"Spotify authorization was cancelled."));
-        assertTrue(body.contains("/styles/spotify-callback.css"));
-        assertTrue(body.contains("/dist/spotify-callback.js"));
+        assertTrue(body.contains("data-callback-type=\"spotify-auth-callback\""));
+        assertTrue(body.contains("data-callback-success=\"false\""));
+        assertTrue(body.contains("data-callback-code=\"spotify_authorization_denied\""));
+        assertTrue(body.contains("data-callback-message=\"Spotify authorization was cancelled."));
+        assertTrue(body.contains("/styles/oauth-callback.css"));
+        assertTrue(body.contains("/dist/oauth-callback.js"));
         assertFalse(body.contains("<style>"));
         assertFalse(body.contains("<script>"));
         assertEquals("no-store", exchange.getResponseHeaders().getFirst("Cache-Control"));
@@ -58,7 +58,7 @@ class AuthRoutesTest {
         callback.invoke(routes, exchange);
 
         String body = exchange.responseBodyAsString();
-        assertTrue(body.contains("data-auth-code=\"spotify_session_missing\""));
+        assertTrue(body.contains("data-callback-code=\"spotify_session_missing\""));
         assertTrue(body.contains("login session is missing or expired"));
     }
 
@@ -73,13 +73,46 @@ class AuthRoutesTest {
         sendCallback.invoke(routes, exchange, false, "bad\"code", "<script>alert(1)</script>");
 
         String body = exchange.responseBodyAsString();
-        assertTrue(body.contains("data-auth-success=\"false\""));
-        assertTrue(body.contains("data-auth-code=\"bad&quot;code\""));
-        assertTrue(body.contains("data-auth-message=\"&lt;script&gt;alert(1)&lt;/script&gt;\""));
+        assertTrue(body.contains("data-callback-success=\"false\""));
+        assertTrue(body.contains("data-callback-code=\"bad&quot;code\""));
+        assertTrue(body.contains("data-callback-message=\"&lt;script&gt;alert(1)&lt;/script&gt;\""));
         assertTrue(body.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assertFalse(body.contains("<script>alert(1)</script>"));
         assertFalse(body.contains("<style>"));
         assertFalse(body.contains("<script>"));
+    }
+
+    @Test
+    void successfulCallbackLoadsScriptBeforeStyles() throws Exception {
+        AuthRoutes routes = new AuthRoutes(new PlaylistCache(new ObjectMapper()),
+                new SpotifySessionStore(), new TestSpotifyOAuthService());
+        Method method = AuthRoutes.class.getDeclaredMethod("sendCallbackHtml", HttpExchange.class, boolean.class, String.class, String.class);
+        method.setAccessible(true);
+        FakeExchange exchange = new FakeExchange("GET", URI.create("http://127.0.0.1/api/auth/callback"));
+
+        method.invoke(routes, exchange, true, "spotify_auth_success", "Spotify connected.");
+
+        String body = exchange.responseBody.toString(StandardCharsets.UTF_8);
+        assertTrue(body.contains("data-callback-success=\"true\""));
+        assertFalse(body.contains("<script>"));
+        assertTrue(body.indexOf("src=\"/dist/oauth-callback.js\"") < body.indexOf("<link"),
+                "Return before loading styles and fonts");
+    }
+
+    @Test
+    void callbackEscapesErrorMessage() throws Exception {
+        AuthRoutes routes = new AuthRoutes(new PlaylistCache(new ObjectMapper()),
+                new SpotifySessionStore(), new TestSpotifyOAuthService());
+        Method method = AuthRoutes.class.getDeclaredMethod("sendCallbackHtml", HttpExchange.class, boolean.class, String.class, String.class);
+        method.setAccessible(true);
+        FakeExchange exchange = new FakeExchange("GET", URI.create("http://127.0.0.1/api/auth/callback"));
+        String message = "</script><script>alert('error')</script>";
+
+        method.invoke(routes, exchange, false, "spotify_callback_failed", message);
+
+        String body = exchange.responseBody.toString(StandardCharsets.UTF_8);
+        assertFalse(body.contains(message));
+        assertTrue(body.contains("&lt;/script&gt;&lt;script&gt;alert(&#39;error&#39;)&lt;/script&gt;"));
     }
 
     @Test

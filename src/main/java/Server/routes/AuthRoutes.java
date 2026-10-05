@@ -4,6 +4,7 @@ import Server.auth.SpotifyOAuthService;
 import Server.cache.PlaylistCache;
 import Server.http.ApiFilters;
 import Server.http.HttpUtils;
+import Server.http.OAuthCallbackPage;
 import Server.session.SpotifySession;
 import Server.session.SpotifySessionStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -12,10 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -331,85 +330,7 @@ public class AuthRoutes {
     }
 
     private void sendCallbackHtml(HttpExchange exchange, boolean success, String code, String message) throws IOException {
-        String status = success ? "Spotify connected" : "Spotify connection failed";
-        String badge = success ? "SUCCESS" : "ERROR";
-        String closeHint = success ? "This window closes automatically in a moment." : "You can close this window and try again.";
-        String safeCode = escapeHtml(code);
-        String safeMessage = escapeHtml(message);
-        String html = """
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <title>VinylMatch - %s</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <meta name="theme-color" content="#f5f5f0">
-                <link rel="preconnect" href="https://fonts.googleapis.com">
-                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-                <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-                <link rel="stylesheet" href="/styles/spotify-callback.css">
-            </head>
-            <body class="spotify-callback-page">
-                <main
-                    class="spotify-callback"
-                    id="spotify-auth-callback"
-                    data-auth-success="%s"
-                    data-auth-code="%s"
-                    data-auth-message="%s"
-                    aria-labelledby="spotify-callback-title"
-                    aria-describedby="spotify-callback-message spotify-callback-close-hint">
-                    <div class="spotify-callback__accent" aria-hidden="true"></div>
-                    <div class="spotify-callback__brand">
-                        <img src="/design/spotify_green.svg" alt="" aria-hidden="true">
-                        <span>VINYLMATCH / SPOTIFY</span>
-                    </div>
-                    <div class="spotify-callback__meta">
-                        <span class="spotify-callback__kicker">Authentication result</span>
-                        <span class="spotify-callback__badge %s" role="status" aria-live="polite">%s</span>
-                    </div>
-                    <h1 id="spotify-callback-title">%s</h1>
-                    <p id="spotify-callback-message" class="spotify-callback__message">%s</p>
-                    <p id="spotify-callback-close-hint" class="spotify-callback__close-hint">%s</p>
-                    <div class="spotify-callback__actions">
-                        <a class="spotify-callback__button" id="oauth-callback-action" href="/">
-                            <span>Back to app</span>
-                            <span aria-hidden="true">↗</span>
-                        </a>
-                    </div>
-                    <p class="spotify-callback__footer">You can close this window after returning.</p>
-                </main>
-                <script type="module" src="/dist/spotify-callback.js"></script>
-            </body>
-            </html>
-            """.formatted(
-                status,
-                success,
-                safeCode,
-                safeMessage,
-                success ? "badge-success" : "badge-error",
-                badge,
-                status,
-                safeMessage,
-                closeHint
-            );
-
-        byte[] body = html.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.sendResponseHeaders(200, body.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-        }
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) return "";
-        return value
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;");
+        OAuthCallbackPage.send(exchange, OAuthCallbackPage.Provider.SPOTIFY, success, code, message);
     }
 
     public record AccessTokenResolution(String token, boolean userAuthenticated) {}
