@@ -2,6 +2,7 @@ package Server.routes;
 
 import Server.auth.DiscogsOAuthService;
 import Server.http.HttpUtils;
+import Server.http.OAuthCallbackPage;
 import Server.http.ApiFilters;
 import Server.http.filters.AdminOnlyFilter;
 import Server.session.DiscogsSession;
@@ -23,10 +24,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -747,88 +746,7 @@ public class DiscogsRoutes {
     }
 
     private void sendOAuthCallbackHtml(HttpExchange exchange, boolean success, String message) throws IOException {
-        String status = success ? "Discogs Login Successful" : "Discogs Login Failed";
-        String color = success ? "#1f7a3f" : "#b23333";
-        String action = success ? "Closing window..." : "You can close this window.";
-        String safeMessage = escapeHtml(message);
-
-        String html = """
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>%s</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; background: #f5f2eb; margin: 0; min-height: 100vh; display: grid; place-items: center; }
-                        .card { width: min(440px, 92vw); background: #fff; border: 2px solid #111; padding: 28px; }
-                        h1 { margin: 0 0 10px; font-size: 24px; color: %s; }
-                        p { margin: 8px 0; color: #1b1b1b; line-height: 1.5; }
-                        .muted { color: #555; font-size: 14px; }
-                    </style>
-                </head>
-                <body>
-                    <main class="card" data-callback-message="%s">
-                        <h1>%s</h1>
-                        <p>%s</p>
-                        <p class="muted">%s</p>
-                    </main>
-                    <script>
-                        (function() {
-                            var success = %s;
-                            var payload = { type: 'discogs-auth-callback', success: success };
-                            var card = document.querySelector('[data-callback-message]');
-                            if (card && !success) {
-                                var callbackMessage = card.getAttribute('data-callback-message');
-                                if (callbackMessage) {
-                                    payload.message = callbackMessage;
-                                }
-                            }
-
-                            if (window.opener) {
-                                window.opener.postMessage(payload, window.location.origin);
-                            }
-
-                            if (success) {
-                                setTimeout(function () {
-                                    window.close();
-                                    if (!window.closed) {
-                                        window.location.href = '/playlist.html';
-                                    }
-                                }, 600);
-                            }
-                        }());
-                    </script>
-                </body>
-                </html>
-                """.formatted(
-                status,
-                color,
-                safeMessage,
-                status,
-                safeMessage,
-                action,
-                success
-        );
-
-        byte[] body = html.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-        exchange.sendResponseHeaders(200, body.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-        }
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        OAuthCallbackPage.send(exchange, OAuthCallbackPage.Provider.DISCOGS, success, message);
     }
 
     private Integer parseYear(Object value) {
