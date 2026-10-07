@@ -1,0 +1,145 @@
+.qs-back {
+    align-self: flex-start;
+    min-height: 44px;
+    margin: 0.5rem 0.75rem 0;
+    padding: 0.5rem;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+}
+
+.qs-detail-status:empty {
+    min-height: 0;
+    padding-block: 0;
+}
+
+.qs-detail-scroll {
+    max-height: 34rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
+}
+
+.qs-detail-content {
+    padding: 1rem 1.25rem 1.5rem;
+}
+
+.qs-detail-heading {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.qs-detail-heading > div {
+    min-width: 0;
+}
+
+.qs-detail-heading h3 {
+    font: 650 1.5rem / 1.3 var(--font-body);
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+}
+
+.qs-detail-artwork {
+    width: 5rem;
+    height: 5rem;
+}
+
+.qs-album-artists {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+}
+
+.qs-text-button {
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.qs-link {
+    font-size: 0.875rem;
+    text-underline-offset: 0.2em;
+}
+
+.qs-section-title {
+    margin: 1.5rem 0 0.625rem;
+    font: 650 1rem / 1.4 var(--font-body);
+}
+
+.qs-providers,
+.qs-artist-albums,
+.qs-tracks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.qs-provider {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0;
+}
+
+.qs-provider strong {
+    font-size: 0.9375rem;
+}
+
+.qs-provider-note {
+    margin-top: 0.75rem;
+    text-wrap: pretty;
+}
+
+.qs-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    text-decoration: none;
+    text-align: center;
+}
+
+.qs-load-more {
+    margin-top: 1rem;
+}
+
+.qs-button[aria-disabled="true"] {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.qs-artist-albums .qs-result {
+    padding-inline: 0;
+}
+
+.qs-tracks li {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding: 0.625rem 0;
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+}
+
+.qs-track-position {
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.qs-matched-track {
+    background: var(--accent-soft);
+    font-weight: 650;
+}

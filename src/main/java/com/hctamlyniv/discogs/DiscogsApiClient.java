@@ -3,6 +3,7 @@ package com.hctamlyniv.discogs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hctamlyniv.discogs.model.CurationCandidate;
+import com.hctamlyniv.discogs.model.CatalogResult;
 import com.hctamlyniv.discogs.model.DiscogsProfile;
 import com.hctamlyniv.discogs.model.WishlistEntry;
 import com.hctamlyniv.discogs.model.WishlistResult;
@@ -22,6 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 
 public class DiscogsApiClient {
 
@@ -83,6 +87,59 @@ public class DiscogsApiClient {
 
     public boolean isConfigured() {
         return hasUserTokenAuth() || hasOAuthCredentials();
+    }
+
+    CatalogResult<JsonNode> fetchCatalogResource(String path) throws IOException, InterruptedException {
+        return awaitCatalogResource(fetchCatalogResourceAsync(path));
+    }
+
+    CompletableFuture<CatalogResult<JsonNode>> fetchCatalogResourceAsync(String path) {
+        if (!isConfigured()) {
+            return CompletableFuture.completedFuture(CatalogResult.failure(503, "discogs_not_configured",
+                    "Connect Discogs on the Playlist page, or configure a server Discogs token."));
+        }
+        HttpRequest request = baseRequest(URI.create(apiBase + path))
+                .timeout(Duration.ofSeconds(12)).GET().build();
+        var response = http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        var result = response.thenApply(body -> {
+            try {
+                return parseCatalogResponse(body);
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        });
+        result.whenComplete((data, error) -> {
+            if (result.isCancelled()) response.cancel(true);
+        });
+        return result;
+    }
+
+    static CatalogResult<JsonNode> awaitCatalogResource(CompletableFuture<CatalogResult<JsonNode>> request)
+            throws IOException, InterruptedException {
+        try {
+            return request.get();
+        } catch (InterruptedException e) {
+            request.cancel(true);
+            throw e;
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException cause) throw cause;
+            throw new IllegalStateException("Discogs catalog request failed", e.getCause());
+        }
+    }
+
+    private CatalogResult<JsonNode> parseCatalogResponse(HttpResponse<String> response) throws IOException {
+        return switch (response.statusCode()) {
+            case 200 -> {
+                JsonNode body = mapper.readTree(response.body());
+                if (body == null || !body.isObject()) throw new IOException("Invalid Discogs catalog response");
+                yield CatalogResult.success(body);
+            }
+            case 404 -> CatalogResult.failure(404, "catalog_not_found", "This Discogs item is no longer available.");
+            case 401, 403 -> CatalogResult.failure(503, "discogs_access_denied",
+                    "Discogs denied access. Reconnect Discogs or check the server token.");
+            case 429 -> CatalogResult.failure(429, "discogs_rate_limited", "Discogs is busy. Please wait before trying again.");
+            default -> CatalogResult.failure(502, "discogs_unavailable", "Discogs is unavailable. Please try again.");
+        };
     }
 
     private boolean hasUserTokenAuth() {
