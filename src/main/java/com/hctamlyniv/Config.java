@@ -63,7 +63,6 @@ public final class Config {
             "SESSION_TTL_DAYS",
             "VINYLMATCH_MASTER_KEY",
             "LOG_LEVEL",
-            "SENTRY_DSN",
             "ENVIRONMENT",
             "ADMIN_USER_IDS"
     );
@@ -332,10 +331,6 @@ public final class Config {
     public static String getLogLevel() {
         String level = get("LOG_LEVEL");
         return level != null && !level.isBlank() ? level : "INFO";
-    }
-
-    public static String getSentryDsn() {
-        return get("SENTRY_DSN");
     }
 
     public static String getEnvironment() {

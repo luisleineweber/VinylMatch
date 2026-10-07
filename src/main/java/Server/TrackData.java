@@ -2,6 +2,7 @@ package Server;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.hctamlyniv.discogs.model.DiscogsMatch;
 
 public class TrackData {
 
@@ -12,6 +13,7 @@ public class TrackData {
     private final Integer releaseYear;
     private final String albumUrl;
     private final String discogsAlbumUrl;
+    private final DiscogsMatch discogsMatch;
     private final String barcode;
     private final String coverUrl;
 
@@ -23,6 +25,7 @@ public class TrackData {
                      @JsonProperty("releaseYear") Integer releaseYear,
                      @JsonProperty("albumUrl") String albumUrl,
                      @JsonProperty("discogsAlbumUrl") String discogsAlbumUrl,
+                     @JsonProperty("discogsMatch") DiscogsMatch discogsMatch,
                      @JsonProperty("barcode") String barcode,
                      @JsonProperty("coverUrl") String coverUrl) {
         this.spotifyTrackId = (spotifyTrackId != null && !spotifyTrackId.isBlank()) ? spotifyTrackId : null;
@@ -32,8 +35,21 @@ public class TrackData {
         this.releaseYear = releaseYear;
         this.albumUrl = albumUrl;
         this.discogsAlbumUrl = discogsAlbumUrl;
+        this.discogsMatch = discogsMatch;
         this.barcode = barcode;
         this.coverUrl = coverUrl;
+    }
+
+    public TrackData(String spotifyTrackId,
+                     String trackName,
+                     String artist,
+                     String album,
+                     Integer releaseYear,
+                     String albumUrl,
+                     String discogsAlbumUrl,
+                     String barcode,
+                     String coverUrl) {
+        this(spotifyTrackId, trackName, artist, album, releaseYear, albumUrl, discogsAlbumUrl, null, barcode, coverUrl);
     }
 
     public String getTrackName() {
@@ -66,6 +82,10 @@ public class TrackData {
 
     public String getDiscogsAlbumUrl() {
         return discogsAlbumUrl;
+    }
+
+    public DiscogsMatch getDiscogsMatch() {
+        return discogsMatch;
     }
 
     public String getBarcode() {

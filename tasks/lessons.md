@@ -1,5 +1,24 @@
 # Lessons Learned
 
+## 2026-07-20
+- A loading overlay is not a timeout: an unresolved browser `fetch()` can leave the page blocked forever, and cleanup in `finally` is unreachable until the promise settles.
+- Add one shared abort deadline to user-triggered provider requests and test it with a fetch that never resolves; keep the timeout error user-facing so existing UI cleanup can run.
+
+## 2026-07-20
+- When adding a manual save form, preserve the entered URL after a failed request so users can correct or retry without retyping it.
+- Make the save helper return success explicitly before clearing form state; a `finally` block resets loading flags even when persistence failed.
+
+## 2026-07-20
+- When a page combines primary data loading with slower third-party enrichment, show a persistent primary-load confirmation and explain that enrichment state is separate; otherwise honest review badges can make a successfully loaded page look broken.
+
+## 2026-07-17
+- When testing HTTP-header sanitization with JDK `Headers`, use a syntactically valid but policy-invalid value (for example an oversized ID); CR/LF is rejected by the JDK fixture itself and never reaches the application filter.
+- Browser fixtures must navigate to the app's real static route (`/playlist.html`) and assert the element's actual semantic role (the Spotify action is a link); a visually correct screenshot can still expose a wrong test locator or shortcut route assumption.
+
+## 2026-07-17
+- When match quality depends on the path that produced a third-party URL, persist provenance and confidence with the URL and migrate URL-only cache entries to an explicit manual-review state; reconstructing quality from URL shape silently overstates certainty.
+- Deployment jobs must fail explicitly when required secrets are absent and verify the same checksum before and after transport; conditional secret-based step skipping can otherwise report success without installing any artifact.
+
 ## 2026-05-07
 - When changing paginated API fixture metadata, update all tests that assert pagination totals and add focused assertions for multi-page ID aggregation; otherwise a product fix can look broken because the fixture and expectation describe different totals.
 - When caching freshly fetched third-party ID sets, return the fetched set immediately after storing it; otherwise the happy path can silently fall through to an empty fallback even though HTTP pagination and parsing succeeded.
@@ -80,3 +99,16 @@
 ## 2026-02-19
 - When replacing text badges with icon-only indicators, always keep explicit `role="img"` and meaningful `aria-label`/`title` strings so the state remains accessible and debuggable.
 - In PowerShell, avoid over-escaped quote patterns for `rg`; prefer `setAttribute(...)`/simple token searches when checking JS attributes to prevent false "file not found" lookup errors.
+
+## 2026-07-17
+- Quote Maven `-D` arguments that contain dotted fully-qualified test names in PowerShell (for example `'-Dtest=Server.cache.PlaylistCacheTest'`); otherwise PowerShell can split the value and Maven reports a misleading unknown lifecycle phase.
+- After adding a route helper that names a session/model type explicitly, run main compilation immediately and add the missing import before expanding tests; route-file wildcard assumptions do not apply in Java.
+- Open OAuth popup windows synchronously inside the user click before awaiting the login-start request; navigate the blank popup only after the server returns the authorization URL, or browsers can classify the delayed `window.open` as a blocked popup.
+- Accept OAuth callback messages only when origin, source window, and message type all match; keep status polling as a fallback and give closed-popup, timeout, malformed-status, and callback failures distinct actionable codes.
+- Bind coverage reporting/gating and dependency scanning explicitly to Maven `verify`, then let CI run one `clean verify`; separate `test`, report, and later `clean package -DskipTests` steps can produce a green build that never executes the security gate and deletes earlier evidence.
+- Keep JaCoCo report and check on the same unexcluded class scope, and upload coverage/security reports with `if: always()` so a failed gate leaves reviewable evidence.
+- When a strict CSP removes `unsafe-inline`, server-rendered pages must move both inline styles and behavior scripts to same-origin assets; otherwise the browser can show unstyled default HTML while the backend response still looks correct.
+
+## 2026-07-20
+- When extending a serialized Java model with a new optional field, keep an overload for the prior constructor signature; otherwise unrelated fixture/unit tests fail at compile time even when the new JSON contract is correct.
+- For server-provenance UI, pass the evidence object through the initial payload before rendering; normalizing a URL-only legacy field in the browser necessarily downgrades it to an honest but noisy low-confidence state.

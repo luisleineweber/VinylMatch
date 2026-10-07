@@ -23,6 +23,49 @@ export async function readApiError(response) {
     }
 }
 
+export const PLAYLIST_REQUEST_TIMEOUT_MS = 30_000;
+
+export function createRequestTimeoutError(timeoutMs = PLAYLIST_REQUEST_TIMEOUT_MS) {
+    const error = new Error(`The request timed out after ${Math.round(timeoutMs / 1000)} seconds. Please try again.`);
+    error.code = "request_timeout";
+    error.timeoutMs = timeoutMs;
+    return error;
+}
+
+export async function fetchWithTimeout(input, init = {}, timeoutMs = PLAYLIST_REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const callerSignal = init?.signal;
+    let abortFromCaller = false;
+    const onCallerAbort = () => {
+        abortFromCaller = true;
+        controller.abort(callerSignal.reason);
+    };
+    if (callerSignal) {
+        if (callerSignal.aborted) {
+            onCallerAbort();
+        }
+        else {
+            callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+        }
+    }
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(input, { ...init, signal: controller.signal });
+        await response.clone().arrayBuffer();
+        return response;
+    }
+    catch (error) {
+        if (!abortFromCaller && controller.signal.aborted) {
+            throw createRequestTimeoutError(timeoutMs);
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timer);
+        callerSignal?.removeEventListener("abort", onCallerAbort);
+    }
+}
+
 export function getPlaylistLoadErrorMessage(response, apiError, fallbackMessage, context = "load") {
     if (apiError?.code === "spotify_playlist_app_restricted") {
         return apiError.message || "Spotify blocks this playlist for this app.";

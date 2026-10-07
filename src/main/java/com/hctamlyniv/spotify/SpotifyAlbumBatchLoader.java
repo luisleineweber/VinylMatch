@@ -34,7 +34,7 @@ public class SpotifyAlbumBatchLoader {
     public Set<String> extractAlbumIds(List<PlaylistTrack> playlistTracks) {
         Set<String> albumIds = new HashSet<>();
         for (PlaylistTrack playlistTrack : playlistTracks) {
-            Object item = playlistTrack.getTrack();
+            Object item = playlistTrack.getItem();
             if (item instanceof Track track) {
                 if (track.getAlbum() != null && track.getAlbum().getId() != null) {
                     albumIds.add(track.getAlbum().getId());
@@ -65,7 +65,7 @@ public class SpotifyAlbumBatchLoader {
 
             try {
                 Album[] batchAlbums = spotifyApi
-                        .getSeveralAlbums(batch.toArray(new String[0]))
+                        .getSeveralAlbums(String.join(",", batch))
                         .build()
                         .execute();
 

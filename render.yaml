@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+services:
+  - type: web
+    name: vinylmatch
+    runtime: docker
+    plan: free
+    region: frankfurt
+    autoDeployTrigger: "off"
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health/simple
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: vinylmatch-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: vinylmatch-redis
+          property: port
+      - key: VINYLMATCH_MASTER_KEY
+        generateValue: true
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: DISCOGS_TOKEN
+        sync: false
+      - key: DISCOGS_USER_AGENT
+        value: VinylMatch/1.0 (+https://github.com/luisleineweber/VinylMatch)
+      - key: DISCOGS_CONSUMER_KEY
+        sync: false
+      - key: DISCOGS_CONSUMER_SECRET
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
+
+  - type: keyvalue
+    name: vinylmatch-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: noeviction
+    ipAllowList: []

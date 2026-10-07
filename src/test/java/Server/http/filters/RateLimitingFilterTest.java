@@ -48,17 +48,39 @@ class RateLimitingFilterTest {
         assertTrue(called.get());
     }
 
+    @Test
+    void ignoresSpoofedForwardedForFromUntrustedPeer() throws Exception {
+        RateLimitingFilter filter = new RateLimitingFilter(new RateLimiter(1, 1));
+        FakeExchange first = new FakeExchange("GET", URI.create("http://127.0.0.1/api/test"), "203.0.113.9");
+        first.getRequestHeaders().set("X-Forwarded-For", "198.51.100.1");
+        filter.doFilter(first, new com.sun.net.httpserver.Filter.Chain(List.of(), ex -> {}));
+
+        FakeExchange second = new FakeExchange("GET", URI.create("http://127.0.0.1/api/test"), "203.0.113.9");
+        second.getRequestHeaders().set("X-Forwarded-For", "198.51.100.2");
+        filter.doFilter(second, new com.sun.net.httpserver.Filter.Chain(List.of(), ex -> fail("spoof bypassed limiter")));
+
+        assertEquals(429, second.responseCode);
+        assertEquals("1", second.getResponseHeaders().getFirst("X-RateLimit-Limit"));
+        assertEquals("0", second.getResponseHeaders().getFirst("X-RateLimit-Remaining"));
+    }
+
     private static final class FakeExchange extends HttpExchange {
         private final Headers requestHeaders = new Headers();
         private final Headers responseHeaders = new Headers();
         private final String method;
         private final URI uri;
         private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
+        private final InetSocketAddress remoteAddress;
         private int responseCode;
 
         private FakeExchange(String method, URI uri) {
+            this(method, uri, "127.0.0.1");
+        }
+
+        private FakeExchange(String method, URI uri, String remoteAddress) {
             this.method = method;
             this.uri = uri;
+            this.remoteAddress = new InetSocketAddress(remoteAddress, 1234);
             requestHeaders.add("Origin", "http://127.0.0.1:8888");
         }
 
@@ -72,7 +94,7 @@ class RateLimitingFilterTest {
         @Override public OutputStream getResponseBody() { return responseBody; }
         @Override public void sendResponseHeaders(int rCode, long responseLength) { this.responseCode = rCode; }
         @Override public int getResponseCode() { return responseCode; }
-        @Override public InetSocketAddress getRemoteAddress() { return new InetSocketAddress("127.0.0.1", 1234); }
+        @Override public InetSocketAddress getRemoteAddress() { return remoteAddress; }
         @Override public InetSocketAddress getLocalAddress() { return new InetSocketAddress("127.0.0.1", 0); }
         @Override public String getProtocol() { return "HTTP/1.1"; }
         @Override public Object getAttribute(String name) { return null; }

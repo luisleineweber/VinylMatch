@@ -67,6 +67,8 @@ public class DiscogsSessionStore {
         }
         
         if (encryptedSession == null) {
+            if (RedisConfig.isRequired() && RedisConfig.isAvailable()) return null;
+            RedisConfig.assertFallbackAllowed();
             encryptedSession = localSessions.get(sessionId);
         }
         
@@ -172,6 +174,7 @@ public class DiscogsSessionStore {
             }
         }
         
+        RedisConfig.assertFallbackAllowed();
         localSessions.put(sessionId, session);
     }
     
@@ -189,6 +192,7 @@ public class DiscogsSessionStore {
             }
         }
         
+        if (!RedisConfig.isAvailable()) RedisConfig.assertFallbackAllowed();
         localSessions.remove(sessionId);
     }
     
@@ -219,6 +223,7 @@ public class DiscogsSessionStore {
             }
         }
         
+        if (!RedisConfig.isAvailable()) RedisConfig.assertFallbackAllowed();
         localSessions.entrySet().removeIf(entry -> username.equals(entry.getValue().username()));
     }
 

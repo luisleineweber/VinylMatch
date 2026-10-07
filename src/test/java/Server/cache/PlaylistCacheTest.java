@@ -2,108 +2,182 @@ package Server.cache;
 
 import Server.PlaylistData;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Unit tests for PlaylistCache.
- */
 class PlaylistCacheTest {
 
-    private PlaylistCache cache;
-    private ObjectMapper mapper;
+    @TempDir
+    Path cacheDir;
 
-    @BeforeEach
-    void setUp() {
-        mapper = new ObjectMapper();
-        cache = new PlaylistCache(mapper);
+    @Test
+    void storesLooksUpAndRemovesEntries() {
+        try (PlaylistCache cache = cache(new MutableClock(), 10, 10, 1_000_000, Duration.ofHours(1))) {
+            PlaylistCacheKey key = key("stored");
+
+            assertNull(cache.lookup(key));
+            cache.store(key, playlist("Stored"));
+            assertEquals("Stored", cache.lookup(key).getPlaylistName());
+
+            cache.remove(key);
+            assertNull(cache.lookup(key));
+        }
     }
 
     @Test
-    @DisplayName("lookup returns null for non-existent key")
-    void lookupReturnsNullForNonExistentKey() {
-        PlaylistCacheKey key = new PlaylistCacheKey("non-existent", "user123", 0, 20);
-        PlaylistData result = cache.lookup(key);
-        assertNull(result, "Should return null for non-existent key");
+    void authenticationChangeInvalidatesBothCacheLevels() throws Exception {
+        try (PlaylistCache cache = cache(new MutableClock(), 10, 10, 1_000_000, Duration.ofHours(1))) {
+            PlaylistCacheKey key = key("authenticated");
+            cache.invalidateForAuthChange("user-a");
+            cache.store(key, playlist("Private"));
+
+            cache.invalidateForAuthChange("user-a");
+            assertNotNull(cache.lookup(key), "same authentication signature must retain cache data");
+
+            cache.invalidateForAuthChange("user-b");
+            assertNull(cache.lookup(key));
+            assertEquals(0, snapshotCount());
+        }
     }
 
     @Test
-    @DisplayName("store and lookup returns same data")
-    void storeAndLookupReturnsSameData() {
-        PlaylistCacheKey key = new PlaylistCacheKey("test-playlist", "user123", 0, 20);
-        PlaylistData data = new PlaylistData(
-            "Test Playlist",
-            "https://example.com/cover.jpg",
-            "https://open.spotify.com/playlist/test",
-            List.of(),
-            0,
-            0,
-            0,
-            false
+    void boundsMemoryAndDiskByEntryCount() throws Exception {
+        MutableClock clock = new MutableClock();
+        try (PlaylistCache cache = cache(clock, 1, 2, 1_000_000, Duration.ofHours(1))) {
+            PlaylistCacheKey first = key("first");
+            PlaylistCacheKey second = key("second");
+            PlaylistCacheKey third = key("third");
+
+            cache.store(first, playlist("First"));
+            clock.advance(Duration.ofSeconds(1));
+            cache.store(second, playlist("Second"));
+            clock.advance(Duration.ofSeconds(1));
+            cache.store(third, playlist("Third"));
+
+            assertEquals(1, cache.memoryEntryCount());
+            assertEquals(2, snapshotCount());
+            assertNull(cache.lookup(first), "oldest snapshot must be evicted from the bounded disk cache");
+            assertNotNull(cache.lookup(third));
+        }
+    }
+
+    @Test
+    void boundsDiskByTotalBytes() throws Exception {
+        try (PlaylistCache cache = cache(new MutableClock(), 1, 10, 1, Duration.ofHours(1))) {
+            PlaylistCacheKey key = key("oversized");
+
+            cache.store(key, playlist("A snapshot larger than one byte"));
+
+            assertEquals(0, snapshotCount());
+        }
+    }
+
+    @Test
+    void scheduledCleanupRemovesExpiredMemoryAndDiskEntriesWithoutLookup() throws Exception {
+        MutableClock clock = new MutableClock();
+        try (PlaylistCache cache = cache(clock, 10, 10, 1_000_000, Duration.ofMillis(20))) {
+            cache.store(key("expired"), playlist("Expired"));
+            assertEquals(1, cache.memoryEntryCount());
+            assertEquals(1, snapshotCount());
+
+            clock.advance(Duration.ofMinutes(2));
+
+            await(() -> cache.memoryEntryCount() == 0 && snapshotCount() == 0);
+        }
+    }
+
+    @Test
+    void closeStopsLifecycleAndRejectsFurtherWrites() throws Exception {
+        MutableClock clock = new MutableClock();
+        PlaylistCache cache = cache(clock, 10, 10, 1_000_000, Duration.ofMillis(20));
+        cache.store(key("retained"), playlist("Retained"));
+
+        cache.close();
+        clock.advance(Duration.ofMinutes(2));
+        Thread.sleep(80);
+
+        assertEquals(1, snapshotCount(), "closed cache must no longer run scheduled cleanup");
+        assertThrows(IllegalStateException.class, () -> cache.store(key("new"), playlist("New")));
+    }
+
+    private PlaylistCache cache(Clock clock, int maxMemoryEntries, int maxDiskEntries,
+                                long maxDiskBytes, Duration cleanupInterval) {
+        return new PlaylistCache(
+                new ObjectMapper(),
+                cacheDir,
+                Duration.ofMinutes(1),
+                maxMemoryEntries,
+                maxDiskEntries,
+                maxDiskBytes,
+                cleanupInterval,
+                clock
         );
-
-        cache.store(key, data);
-        PlaylistData result = cache.lookup(key);
-
-        assertNotNull(result, "Should return stored data");
-        assertEquals("Test Playlist", result.getPlaylistName(), "Playlist name should match");
     }
 
-    @Test
-    @DisplayName("remove clears cached entry")
-    void removesClearsEntry() {
-        PlaylistCacheKey key = new PlaylistCacheKey("remove-test", "user123", 0, 20);
-        PlaylistData data = new PlaylistData(
-            "Remove Test",
-            null,
-            null,
-            List.of(),
-            0,
-            0,
-            0,
-            false
-        );
-
-        cache.store(key, data);
-        assertNotNull(cache.lookup(key), "Should have data before remove");
-
-        cache.remove(key);
-        assertNull(cache.lookup(key), "Should be null after remove");
+    private long snapshotCount() throws Exception {
+        if (!Files.exists(cacheDir)) return 0;
+        try (var files = Files.list(cacheDir)) {
+            return files.filter(path -> path.getFileName().toString().endsWith(".json")).count();
+        }
     }
 
-    @Test
-    @DisplayName("invalidateForAuthChange clears all entries")
-    void invalidateForAuthChangeClearsAllEntries() {
-        PlaylistCacheKey key1 = new PlaylistCacheKey("playlist1", "user1", 0, 20);
-        PlaylistCacheKey key2 = new PlaylistCacheKey("playlist2", "user1", 0, 20);
-        PlaylistData data = new PlaylistData("Test", null, null, List.of(), 0, 0, 0, false);
-
-        cache.store(key1, data);
-        cache.store(key2, data);
-
-        // Simulate auth change
-        cache.invalidateForAuthChange("new-user-signature");
-
-        assertNull(cache.lookup(key1), "Should be cleared after auth change");
-        assertNull(cache.lookup(key2), "Should be cleared after auth change");
+    private static PlaylistCacheKey key(String id) {
+        return new PlaylistCacheKey(id, "user", 0, 50);
     }
 
-    @Test
-    @DisplayName("same auth signature does not clear cache")
-    void sameAuthSignatureDoesNotClearCache() {
-        PlaylistCacheKey key = new PlaylistCacheKey("same-auth-test", "user1", 0, 20);
-        PlaylistData data = new PlaylistData("Test", null, null, List.of(), 0, 0, 0, false);
+    private static PlaylistData playlist(String name) {
+        return new PlaylistData(name, null, null, List.of());
+    }
 
-        cache.invalidateForAuthChange("same-signature");
-        cache.store(key, data);
+    private static void await(CheckedCondition condition) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.evaluate()) return;
+            Thread.sleep(10);
+        }
+        assertTrue(condition.evaluate(), "condition was not met before timeout");
+    }
 
-        // Same signature should not clear
-        cache.invalidateForAuthChange("same-signature");
+    @FunctionalInterface
+    private interface CheckedCondition {
+        boolean evaluate() throws Exception;
+    }
 
-        assertNotNull(cache.lookup(key), "Should still have data with same auth signature");
+    private static final class MutableClock extends Clock {
+        private volatile Instant instant = Instant.parse("2026-07-17T00:00:00Z");
+
+        void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 }

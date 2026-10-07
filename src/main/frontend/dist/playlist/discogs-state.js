@@ -53,6 +53,27 @@ function isSearchFallbackUrl(url) {
     return typeof url === "string" && url.toLowerCase().includes("/search");
 }
 
+export function normalizeDiscogsMatch(value) {
+    const raw = value && typeof value === "object" ? value : null;
+    const candidateUrl = typeof value === "string" ? value : raw?.url;
+    const url = typeof candidateUrl === "string" ? safeDiscogsUrl(candidateUrl) : null;
+    if (!url) return null;
+    const matchType = typeof raw?.matchType === "string" ? raw.matchType : "MANUAL_REVIEW";
+    const confidence = typeof raw?.confidence === "string" ? raw.confidence : "LOW";
+    const source = typeof raw?.source === "string" ? raw.source : "LEGACY_CLIENT_DATA";
+    const reason = typeof raw?.reason === "string" && raw.reason.trim()
+        ? raw.reason.trim()
+        : "No server-side match evidence is available; verify this entry on Discogs.";
+    return {
+        url,
+        matchType,
+        confidence,
+        source,
+        reason,
+        vinylFormatConfirmed: raw?.vinylFormatConfirmed === true,
+    };
+}
+
 function normalizeLookupPart(value) {
     if (value === null || value === undefined) {
         return "";
@@ -90,7 +111,8 @@ function resolveLookupKey(key, explicitLookupKey) {
     }
     return null;
 }
-function applyDiscogsResultToTrack(key, index, url, state, scheduleLibraryRefresh) {
+function applyDiscogsResultToTrack(key, index, match, state, scheduleLibraryRefresh) {
+    const url = match?.url ?? null;
     if (key) {
         discogsState.requested.delete(key);
         discogsState.completed.add(key);
@@ -100,6 +122,7 @@ function applyDiscogsResultToTrack(key, index, url, state, scheduleLibraryRefres
         const track = state.aggregated.tracks[index];
         if (track) {
             track.discogsAlbumUrl = url;
+            track.discogsMatch = match;
             track.discogsStatus = url ? "found" : "not-found";
         }
     }
@@ -108,7 +131,7 @@ function applyDiscogsResultToTrack(key, index, url, state, scheduleLibraryRefres
         ? getRegistryEntry(buildTrackKey(state.aggregated?.tracks?.[index], index))
         : undefined);
     if (targetEntry?.setDiscogsState) {
-        targetEntry.setDiscogsState(url ? "found" : "not-found", url ?? undefined);
+        targetEntry.setDiscogsState(url ? "found" : "not-found", match ?? undefined);
     }
     if (url) {
         scheduleLibraryRefresh(200);
@@ -118,21 +141,22 @@ export function applyDiscogsResult(result, state, scheduleLibraryRefresh) {
     if (!result) return;
     const key = typeof result.key === "string" ? result.key : null;
     const index = typeof result.index === "number" ? result.index : null;
-    const url = typeof result.url === "string" && result.url ? safeDiscogsUrl(result.url) : null;
+    const match = normalizeDiscogsMatch(result);
+    const url = match?.url ?? null;
     const lookupKey = resolveLookupKey(key, result.lookupKey);
     const aliases = lookupKey ? discogsState.lookupAliases.get(lookupKey) : null;
     if (Array.isArray(aliases) && aliases.length > 0) {
         for (const alias of aliases) {
             const aliasKey = typeof alias?.key === "string" ? alias.key : null;
             const aliasIndex = typeof alias?.index === "number" ? alias.index : null;
-            applyDiscogsResultToTrack(aliasKey, aliasIndex, url, state, scheduleLibraryRefresh);
+            applyDiscogsResultToTrack(aliasKey, aliasIndex, match, state, scheduleLibraryRefresh);
         }
     }
     else {
-        applyDiscogsResultToTrack(key, index, url, state, scheduleLibraryRefresh);
+        applyDiscogsResultToTrack(key, index, match, state, scheduleLibraryRefresh);
     }
     if (lookupKey) {
-        discogsState.lookupResults.set(lookupKey, url);
+        discogsState.lookupResults.set(lookupKey, match);
         discogsState.lookupInFlight.delete(lookupKey);
         discogsState.lookupAliases.delete(lookupKey);
     }
@@ -251,20 +275,21 @@ export function queueDiscogsLookups(startIndex, tracks, state, scheduleLibraryRe
             ? safeDiscogsUrl(track.discogsAlbumUrl)
             : null;
         track.discogsAlbumUrl = existingUrl;
+        const existingMatch = normalizeDiscogsMatch(track.discogsMatch);
 
-        if (existingUrl && !isSearchFallbackUrl(existingUrl)) {
+        if (existingMatch && existingMatch.url === existingUrl && !isSearchFallbackUrl(existingUrl)) {
             discogsState.completed.add(key);
             if (lookupKey) {
-                discogsState.lookupResults.set(lookupKey, existingUrl);
+                discogsState.lookupResults.set(lookupKey, existingMatch);
                 discogsState.lookupInFlight.delete(lookupKey);
                 discogsState.lookupAliases.delete(lookupKey);
             }
-            applyDiscogsResult({ key, index, url: existingUrl, lookupKey }, state, scheduleLibraryRefresh);
+            applyDiscogsResult({ key, index, ...existingMatch, lookupKey }, state, scheduleLibraryRefresh);
             continue;
         }
         track.discogsStatus = "pending";
         if (lookupKey && discogsState.lookupResults.has(lookupKey)) {
-            applyDiscogsResult({ key, index, url: discogsState.lookupResults.get(lookupKey), lookupKey }, state, scheduleLibraryRefresh);
+            applyDiscogsResult({ key, index, ...discogsState.lookupResults.get(lookupKey), lookupKey }, state, scheduleLibraryRefresh);
             continue;
         }
         if (discogsState.completed.has(key) || discogsState.requested.has(key)) {
@@ -282,7 +307,8 @@ export function queueDiscogsLookups(startIndex, tracks, state, scheduleLibraryRe
     return processDiscogsQueue(state, scheduleLibraryRefresh);
 }
 
-export function markDiscogsResult(key, index, url, state, scheduleLibraryRefresh) {
+export function markDiscogsResult(key, index, match, state, scheduleLibraryRefresh) {
     const lookupKey = key ? discogsState.lookupKeyByTrackKey.get(key) : null;
-    applyDiscogsResult({ key, index, url, lookupKey }, state, scheduleLibraryRefresh);
+    const normalized = normalizeDiscogsMatch(match);
+    applyDiscogsResult({ key, index, ...(normalized ?? {}), lookupKey }, state, scheduleLibraryRefresh);
 }

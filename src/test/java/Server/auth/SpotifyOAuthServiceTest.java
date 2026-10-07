@@ -23,6 +23,7 @@ class SpotifyOAuthServiceTest {
         assertNotNull(url);
         assertTrue(url.contains("state="));
         assertTrue(url.contains("scope="));
+        assertTrue(url.contains("user-read-currently-playing"));
     }
 
     @Test

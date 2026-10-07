@@ -13,6 +13,8 @@ import java.util.List;
  */
 public class SpotifyPlaylistReader {
 
+    private static final int PAGE_SIZE = 50;
+
     private final SpotifyApi spotifyApi;
 
     public SpotifyPlaylistReader(SpotifyApi spotifyApi) {
@@ -31,13 +33,13 @@ public class SpotifyPlaylistReader {
      * 
      * @param playlistId The playlist ID
      * @param offset Starting offset
-     * @param limit Maximum items per page (max 100)
+     * @param limit Maximum items per page (max 50)
      * @return Paging object with playlist tracks
      */
     public Paging<PlaylistTrack> getPlaylistItems(String playlistId, int offset, int limit) throws Exception {
         return spotifyApi
-                .getPlaylistsItems(playlistId)
-                .limit(Math.min(limit, 100))
+                .getPlaylistItems(playlistId)
+                .limit(Math.min(limit, PAGE_SIZE))
                 .offset(offset)
                 .build()
                 .execute();
@@ -65,7 +67,7 @@ public class SpotifyPlaylistReader {
                 break;
             }
 
-            int requestLimit = paginated ? Math.min(remaining, 100) : 100;
+            int requestLimit = paginated ? Math.min(remaining, PAGE_SIZE) : PAGE_SIZE;
             if (requestLimit <= 0) {
                 break;
             }

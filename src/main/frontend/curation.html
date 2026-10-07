@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VinylMatch — Curation</title>
 
-    <script>
-      (() => {
-        try {
-          const theme = localStorage.getItem("vinylmatch_theme");
-          if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-        } catch (_) {}
-      })();
-    </script>
+    <script src="/dist/theme-bootstrap.js"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -82,6 +75,17 @@
                         <div class="curation-album" id="curation-album"></div>
                         <p class="curation-jev hidden" id="curation-jev" role="status" aria-live="polite"></p>
                         <div class="curation-candidates" id="curation-candidates"></div>
+                        <section class="manual-link" id="curation-manual-link" aria-labelledby="curation-manual-link-heading" hidden>
+                            <div class="manual-link__copy">
+                                <h3 id="curation-manual-link-heading">Add a link manually</h3>
+                                <p>Use this when the suggested Discogs releases do not include the right pressing.</p>
+                            </div>
+                            <form class="manual-link__form" id="curation-manual-link-form">
+                                <label class="sr-only" for="curation-manual-link-url">Discogs release or master URL</label>
+                                <input id="curation-manual-link-url" name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.discogs.com/release/..." required />
+                                <button class="btn ghost" id="curation-manual-link-save" type="submit">Save manual link</button>
+                            </form>
+                        </section>
                         <p class="muted" id="curation-empty">Idle</p>
                     </div>
                 </div>

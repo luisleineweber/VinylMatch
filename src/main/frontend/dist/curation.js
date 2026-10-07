@@ -1,6 +1,6 @@
 import { injectHeader } from "./common/header.js";
-import { getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
-import { buildCurationQueue, normalizeForSearch, primaryArtist } from "./common/playlist-utils.js";
+import { fetchWithTimeout, getPlaylistLoadErrorMessage, readApiError } from "./common/api-errors.js";
+import { buildAlbumKey, buildCurationQueue, normalizeForSearch, primaryArtist } from "./common/playlist-utils.js";
 import { readCachedPlaylist, storePlaylistChunk } from "./storage.js";
 
 const DEFAULT_TEMPLATE = "";
@@ -64,7 +64,7 @@ async function injectTemplate(container, templateUrl) {
     if (!container || !templateUrl)
         return;
     try {
-        const res = await fetch(templateUrl);
+        const res = await fetchWithTimeout(templateUrl);
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
         }
@@ -89,7 +89,22 @@ function resetCurationUi(container, message) {
             empty.textContent = message;
         empty.classList.remove("hidden");
     }
+    const manualLink = select(container, "#curation-manual-link");
+    if (manualLink)
+        manualLink.hidden = true;
     renderJevDecision(container, null);
+}
+
+function updateManualLinkForm(container, item) {
+    const manualLink = select(container, "#curation-manual-link");
+    const input = select(container, "#curation-manual-link-url");
+    if (!manualLink)
+        return;
+    manualLink.hidden = !item;
+    if (input) {
+        input.value = "";
+        input.setCustomValidity("");
+    }
 }
 
 function renderJevDecision(container, decision) {
@@ -191,6 +206,7 @@ function renderCurationAlbum(container, item, placeholderImage) {
     }
     album.appendChild(img);
     album.appendChild(meta);
+    updateManualLinkForm(container, item);
 }
 
 function createCandidateCard(container, item, candidate, onCandidateSaved) {
@@ -305,13 +321,14 @@ async function loadCurationCandidates(container, item) {
     if (!item)
         return [];
     curationState.loading = true;
+    item.curationVersion = undefined;
     const empty = select(container, "#curation-empty");
     if (empty) {
         empty.textContent = "Loading candidates...";
         empty.classList.remove("hidden");
     }
     try {
-        const res = await fetch("/api/discogs/curation/candidates", {
+        const res = await fetchWithTimeout("/api/discogs/curation/candidates", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -328,6 +345,10 @@ async function loadCurationCandidates(container, item) {
             throw new Error(apiError?.message || "HTTP " + res.status);
         }
         const payload = await res.json();
+        if (!Number.isSafeInteger(payload?.curationVersion) || payload.curationVersion < 0) {
+            throw new Error("Invalid curation version.");
+        }
+        item.curationVersion = payload.curationVersion;
         const discogsCandidates = Array.isArray(payload?.candidates)
             ? payload.candidates
             : [];
@@ -388,14 +409,18 @@ async function loadCurationCandidates(container, item) {
 
 async function selectCandidate(container, item, candidate, button, onCandidateSaved) {
     const safeUrl = safeDiscogsUrl(candidate?.url);
-    if (!safeUrl || curationState.saving)
+    if (!safeUrl || curationState.saving || curationState.loading)
         return;
+    if (!Number.isSafeInteger(item.curationVersion)) {
+        setCurationStatus("Load candidates before saving.", "error");
+        return false;
+    }
     curationState.saving = true;
     const original = button.textContent;
     button.textContent = "Saving…";
     button.disabled = true;
     try {
-        const res = await fetch("/api/discogs/curation/save", {
+        const res = await fetchWithTimeout("/api/discogs/curation/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -405,17 +430,30 @@ async function selectCandidate(container, item, candidate, button, onCandidateSa
                 trackTitle: item.trackName,
                 url: safeUrl,
                 thumb: safeDiscogsImage(candidate.thumb),
+                expectedVersion: item.curationVersion,
+                reason: "Selected Discogs candidate",
             }),
         });
-        if (!res.ok)
-            throw new Error("HTTP " + res.status);
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) {
+            const message = payload?.error?.message || (res.status === 409
+                ? "This curation changed elsewhere. Reload before saving again."
+                : "HTTP " + res.status);
+            throw new Error(message);
+        }
+        if (!Number.isSafeInteger(payload?.entry?.version) || payload.entry.version < 1) {
+            throw new Error("Invalid saved curation version.");
+        }
+        item.curationVersion = payload.entry.version;
         button.textContent = "Saved";
         onCandidateSaved?.(item, candidate.url);
         setTimeout(() => (button.textContent = original), 1200);
+        return true;
     }
     catch (e) {
         setCurationStatus("Could not save link: " + (e instanceof Error ? e.message : String(e)), "error");
         button.textContent = original;
+        return false;
     }
     finally {
         button.disabled = false;
@@ -446,6 +484,22 @@ async function showCurationItem(container, step, placeholderImage, onCandidateSa
     renderCurationCandidates(container, current, curationState.candidates, onCandidateSaved);
 }
 
+async function saveManualLink(container, item, button, onCandidateSaved) {
+    const input = select(container, "#curation-manual-link-url");
+    const value = input?.value?.trim() || "";
+    const safeUrl = safeDiscogsUrl(value);
+    if (!safeUrl) {
+        input?.setCustomValidity("Enter a valid Discogs release or master URL.");
+        input?.reportValidity();
+        return;
+    }
+    input?.setCustomValidity("");
+    const saved = await selectCandidate(container, item, { url: safeUrl, thumb: null }, button, onCandidateSaved);
+    if (saved && input) {
+        input.value = "";
+    }
+}
+
 async function initCurationPanel(options = {}) {
     const container = options.container ?? document.getElementById(options.containerId ?? "curation-panel-container");
     if (!container)
@@ -458,25 +512,41 @@ async function initCurationPanel(options = {}) {
     updateCurationProgress(container);
     const placeholderImage = options.placeholderImage ?? "";
     const buildQueue = typeof options.buildQueue === "function" ? options.buildQueue : () => [];
+    const rebuildQueue = () => {
+        const previous = new Map(curationState.queue.map((item) => [buildAlbumKey(item), item]));
+        curationState.queue = buildQueue().map((item) => {
+            const existing = previous.get(buildAlbumKey(item));
+            return existing ? Object.assign(existing, item) : item;
+        });
+    };
     const onCandidateSaved = typeof options.onCandidateSaved === "function" ? options.onCandidateSaved : () => {};
     const startBtn = select(container, "#curation-start");
     const nextBtn = select(container, "#curation-next");
     const prevBtn = select(container, "#curation-prev");
+    const manualForm = select(container, "#curation-manual-link-form");
+    manualForm?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const current = curationState.queue[curationState.index];
+        const saveButton = select(container, "#curation-manual-link-save");
+        if (current && saveButton) {
+            return saveManualLink(container, current, saveButton, onCandidateSaved);
+        }
+    });
     startBtn?.addEventListener("click", () => {
-        curationState.queue = buildQueue();
+        rebuildQueue();
         curationState.index = 0;
         if (!curationState.queue.length) {
             resetCurationUi(container, "No tracks.");
             updateCurationProgress(container);
             return;
         }
-        showCurationItem(container, 0, placeholderImage, onCandidateSaved);
+        return showCurationItem(container, 0, placeholderImage, onCandidateSaved);
     });
     nextBtn?.addEventListener("click", () => showCurationItem(container, 1, placeholderImage, onCandidateSaved));
     prevBtn?.addEventListener("click", () => showCurationItem(container, -1, placeholderImage, onCandidateSaved));
     return {
         refreshQueue: () => {
-            curationState.queue = buildQueue();
+            rebuildQueue();
             curationState.index = Math.min(curationState.index, Math.max(0, curationState.queue.length - 1));
             updateCurationProgress(container);
         },
@@ -538,7 +608,7 @@ async function fetchPlaylist(id) {
     let hasMore = true;
     while (hasMore) {
         const query = new URLSearchParams({ id, offset: String(offset), limit: String(PAGE_SIZE) });
-        const res = await fetch(`/api/playlist?${query.toString()}`, { cache: "no-cache" });
+        const res = await fetchWithTimeout(`/api/playlist?${query.toString()}`, { cache: "no-cache" });
         if (!res.ok) {
             const apiError = await readApiError(res);
             throw new Error(getPlaylistLoadErrorMessage(res, apiError, `HTTP ${res.status}`));
@@ -609,7 +679,7 @@ async function loadPlaylistFromInput() {
 async function initCurationPage() {
     await injectHeader();
     
-    const statusRes = await fetch("/api/auth/status", { cache: "no-cache", credentials: "include" });
+    const statusRes = await fetchWithTimeout("/api/auth/status", { cache: "no-cache", credentials: "include" });
     if (statusRes.ok) {
         const status = await statusRes.json();
         if (!status?.loggedIn) {

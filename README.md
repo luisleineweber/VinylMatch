@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/hctamlyniv/VinylMatch/actions/workflows/ci.yml/badge.svg)](https://github.com/hctamlyniv/VinylMatch/actions/workflows/ci.yml)
 [![Deploy](https://github.com/hctamlyniv/VinylMatch/actions/workflows/deploy.yml/badge.svg)](https://github.com/hctamlyniv/VinylMatch/actions/workflows/deploy.yml)
-[![Coverage](https://img.shields.io/badge/coverage-gated%20at%2040%25-green.svg)](./pom.xml)
+[![Coverage](https://img.shields.io/badge/coverage-gated%20at%2050%25-green.svg)](./pom.xml)
 [![Java 21](https://img.shields.io/badge/Java-21-blue.svg)](https://openjdk.org/projects/jdk/21/)
 [![Runtime](https://img.shields.io/badge/runtime-java--jar-success.svg)](./pom.xml)
 
@@ -166,13 +166,17 @@ Set these in the Railway app service:
 | `DISCOGS_TOKEN` | Optional | Enables Discogs API matching |
 | `DISCOGS_USER_AGENT` | Recommended | Required by Discogs API terms |
 | `VINYLMATCH_MASTER_KEY` | Yes | Use a long random secret; keep stable across restarts |
-| `REDIS_HOST` | Recommended | Map from Railway Redis host |
+| `REDIS_HOST` | Required in production | Map from Railway Redis host; production fails fast instead of silently using per-instance memory |
 | `REDIS_PORT` | Recommended | Map from Railway Redis port |
 | `REDIS_PASSWORD` | Recommended | Map from Railway Redis password |
 
 If Railway exposes Redis through reference variables instead of fixed names, map them into the app's expected variables `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`.
 
-`pom.xml` already wires `NVD_API_KEY` into `dependency-check-maven`. If the NVD feed still returns a transient error, the build now continues instead of failing the whole deploy, but Railway should still set the API key for reliable vulnerability updates.
+`pom.xml` wires `NVD_API_KEY` into `dependency-check-maven`. GitHub CI runs the scanner during
+`mvn -B clean verify`; configure the repository secret `NVD_API_KEY` to avoid shared NVD rate limits.
+Confirmed vulnerabilities at CVSS 7 or higher fail verification. Feed/network failures are treated as
+transient (`failOnError=false`), so they warn instead of masking otherwise valid builds; CI always attempts
+to upload the HTML/JSON scan reports, and a missing report is visible as an artifact warning.
 
 #### Domain and Spotify OAuth
 
@@ -189,7 +193,7 @@ Spotify redirect URIs must match exactly, including protocol, host, and path.
 
 1. Push code to GitHub.
 2. Railway redeploys the service from the connected repo.
-3. Open `https://your-domain/api/health` to confirm the deployment is healthy.
+3. Open `https://your-domain/api/health/ready` to confirm required production dependencies are ready.
 4. Test Spotify login with the hosted callback URL.
 
 ### Release Flow
@@ -201,7 +205,7 @@ Spotify redirect URIs must match exactly, including protocol, host, and path.
 
 ### Release Checklist
 
-1. Run `mvn test` and `mvn package` locally before cutting a release.
+1. Run `mvn -B clean verify` locally before cutting a release. This is the same lifecycle used by CI.
 2. Bump the version in `pom.xml` if you are shipping a new public version.
 3. Merge the release candidate to `develop` and verify staging.
 4. Create an annotated tag such as `git tag -a v0.1.1 -m "VinylMatch v0.1.1"` on the commit you want to ship.
@@ -235,6 +239,25 @@ Security note:
 | `CORS_ALLOWED_ORIGINS` | No | Comma-separated allowed origins |
 | `RATE_LIMIT_PER_MINUTE` | No | Requests/minute per client+path (default `240`) |
 | `RATE_LIMIT_BURST` | No | Burst capacity (default `max(30, perMinute/4)`) |
+| `RATE_LIMIT_MAX_BUCKETS` | No | Maximum local client/route buckets (default `10000`) |
+| `RATE_LIMIT_IDLE_SECONDS` | No | Idle bucket eviction age (default `600`) |
+| `TRUSTED_PROXY_CIDRS` | Production | Comma-separated immediate proxy CIDRs allowed to set forwarded client/proto headers |
+| `REQUEST_THREADS` | No | Inbound HTTP request capacity (default `32`) |
+| `PROVIDER_THREADS` | No | Bounded Spotify/provider worker count (default `8`) |
+| `PROVIDER_QUEUE_CAPACITY` | No | Maximum queued provider calls before `503` (default `32`) |
+| `PROVIDER_TIMEOUT_SECONDS` | No | Provider-call deadline (default `20`) |
+| `DISCOGS_PROVIDER_CONCURRENCY` | No | Maximum concurrent Discogs match operations (default `6`) |
+
+API responses expose `X-RateLimit-Limit` and `X-RateLimit-Remaining`; rejected requests also include `Retry-After`. Development uses a bounded in-process token bucket. Production uses Redis-backed fixed windows so limits remain consistent across instances and fails closed with `503` if the shared limiter is unavailable.
+| `PLAYLIST_CACHE_TTL_SECONDS` | No | Local playlist-cache TTL in seconds (default `300`) |
+| `PLAYLIST_CACHE_MAX_MEMORY_ENTRIES` | No | Maximum in-memory playlist entries per app instance (default `100`) |
+| `PLAYLIST_CACHE_MAX_DISK_ENTRIES` | No | Maximum local playlist snapshot files (default `200`) |
+| `PLAYLIST_CACHE_MAX_DISK_BYTES` | No | Maximum total bytes for local playlist snapshots (default `104857600`) |
+| `PLAYLIST_CACHE_CLEANUP_SECONDS` | No | Cleanup and bound-enforcement interval in seconds (default `60`) |
+
+The playlist cache is deliberately local to one application instance. Memory entries and files under
+`cache/playlists` are not shared or invalidated across replicas, and local snapshots may disappear when
+an instance is replaced. Treat it only as a performance cache; a shared cache would be a separate design.
 
 ### Spotify Developer Setup
 
@@ -304,7 +327,9 @@ The server exposes REST endpoints under `/api/*`.
 ## Notes
 
 - No Discogs token: matching falls back to Discogs web search URLs.
-- Sessions use Redis when configured and fall back to in-memory storage for local development.
+- Sessions require Redis in production and use in-memory storage only in development/test.
+
+Health endpoints have separate contracts: `/api/health/simple` and `/api/health/live` are non-blocking liveness probes, `/api/health/ready` checks required Redis/system readiness, and `/api/health/dependencies` returns a cached background snapshot of optional Spotify/Discogs reachability.
 - The app only uses metadata; it does not download or store any audio.
 
 ## License

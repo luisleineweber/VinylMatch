@@ -6,29 +6,73 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
       
     - name: Set up JDK 21
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v6
       with:
         java-version: '21'
         distribution: 'temurin'
         cache: maven
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+
+    - name: Verify clean-checkout frontend graph and syntax
+      shell: bash
+      run: |
+        npm ci
+        npm run check:frontend
+        while IFS= read -r file; do node --check "$file"; done < <(git ls-files '*.js' '*.mjs' | grep -E '^(src/main/frontend|src/test/frontend|scripts)/')
+        npm run test:frontend
         
-    - name: Run tests with Maven
-      run: mvn clean test
-      
-    - name: Generate coverage report
-      run: mvn jacoco:report
-      
-    - name: Build with Maven
-      run: mvn clean package -DskipTests
+    - name: Test, package, verify coverage, and scan dependencies
+      run: mvn -B clean verify
+
+    - name: Upload JaCoCo coverage report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: jacoco-coverage
+        path: target/site/jacoco/
+        if-no-files-found: warn
+        retention-days: 14
+
+    - name: Upload dependency-check reports
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: dependency-check-reports
+        path: |
+          target/dependency-check-report.html
+          target/dependency-check-report.json
+        if-no-files-found: warn
+        retention-days: 14
+
+    - name: Summarize dependency-check evidence
+      if: always()
+      shell: bash
+      run: |
+        if compgen -G "target/dependency-check-report.*" > /dev/null; then
+          echo "Dependency-Check report generated; confirmed CVSS 7+ findings fail Maven verify." >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "::warning::Dependency-Check produced no report. NVD/feed failures are transient by policy; inspect the Maven log and configure NVD_API_KEY before relying on this run."
+          echo "Dependency-Check report missing. Inspect the Maven log; configure NVD_API_KEY for reliable NVD updates." >> "$GITHUB_STEP_SUMMARY"
+        fi
       
     - name: Upload build artifacts
       uses: actions/upload-artifact@v7
@@ -36,3 +80,64 @@ jobs:
         name: VinylMatch-jar
         path: target/VinylMatch.jar
         retention-days: 7
+
+  browser-e2e:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/download-artifact@v7
+        with:
+          name: VinylMatch-jar
+          path: target
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run deterministic browser flows
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: browser-e2e-artifacts
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  built-jar-smoke:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: actions/download-artifact@v7
+        with:
+          name: VinylMatch-jar
+          path: target
+      - name: Start exact built artifact
+        run: |
+          ENVIRONMENT=development PORT=8888 java -jar target/VinylMatch.jar > target/smoke-server.log 2>&1 &
+          echo $! > target/smoke-server.pid
+      - name: Run smoke checks
+        env:
+          BASE_URL: http://127.0.0.1:8888
+        run: bash scripts/smoke-tests.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: built-jar-smoke-log
+          path: target/smoke-server.log
+          if-no-files-found: warn

@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!pom.xml
+!src/
+!src/main/
+!src/main/**
+!scripts/
+!scripts/start-render.sh

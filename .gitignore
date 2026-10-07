@@ -85,7 +85,8 @@ config/vendors.json
 project_structure.txt
 
 # Background Data / Documentation
-docs/
+docs/*
+!docs/full-prod-roadmap-17-07-26.html
 
 # Local task/workspace files (AI workspace)
 AGENTS.md

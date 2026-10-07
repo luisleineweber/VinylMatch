@@ -2,6 +2,7 @@ package Server.routes;
 
 import Server.http.ApiFilters;
 import Server.http.HttpUtils;
+import Server.http.ProviderExecutor;
 import Server.session.RedisConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hctamlyniv.Config;
@@ -27,6 +28,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Health check endpoint for monitoring and load balancers.
@@ -42,6 +44,13 @@ public class HealthRoutes {
     
     private final String spotifyClientId;
     private final String discogsToken;
+    private final AtomicBoolean dependencyRefreshRunning = new AtomicBoolean();
+    private volatile Map<String, Object> dependencySnapshot = Map.of(
+        "status", "UNKNOWN",
+        "timestamp", Instant.EPOCH.toString(),
+        "checks", Map.of()
+    );
+    private volatile long dependencySnapshotAt;
     
     public HealthRoutes() {
         this.spotifyClientId = Config.getSpotifyClientId();
@@ -49,8 +58,12 @@ public class HealthRoutes {
     }
     
     public void register(HttpServer server) {
-        server.createContext("/api/health", this::handleHealth).getFilters().add(ApiFilters.securityHeaders());
-        server.createContext("/api/health/simple", this::handleSimpleHealth).getFilters().add(ApiFilters.securityHeaders());
+        var lightweightFilters = java.util.List.of(ApiFilters.securityHeaders());
+        server.createContext("/api/health", this::handleDependencies).getFilters().addAll(lightweightFilters);
+        server.createContext("/api/health/dependencies", this::handleDependencies).getFilters().addAll(lightweightFilters);
+        server.createContext("/api/health/ready", this::handleReadiness).getFilters().addAll(lightweightFilters);
+        server.createContext("/api/health/live", this::handleSimpleHealth).getFilters().addAll(lightweightFilters);
+        server.createContext("/api/health/simple", this::handleSimpleHealth).getFilters().addAll(lightweightFilters);
     }
     
     /**
@@ -69,47 +82,60 @@ public class HealthRoutes {
     /**
      * Comprehensive health check with detailed status.
      */
-    private void handleHealth(HttpExchange exchange) throws IOException {
+    private void handleReadiness(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             HttpUtils.sendApiError(exchange, 405, "method_not_allowed", "Only GET is supported");
             return;
         }
-        
-        long startTime = System.currentTimeMillis();
-        Map<String, Object> health = new HashMap<>();
-        Map<String, Object> checks = new HashMap<>();
-        
-        // Overall status
-        boolean allHealthy = true;
-        
-        // Check Redis
-        Map<String, Object> redisCheck = checkRedis();
-        checks.put("redis", redisCheck);
-        allHealthy &= (Boolean) redisCheck.get("healthy");
-        
-        // Check Spotify API
-        Map<String, Object> spotifyCheck = checkSpotify();
-        checks.put("spotify", spotifyCheck);
-        allHealthy &= (Boolean) spotifyCheck.get("healthy");
-        
-        // Check Discogs API
-        Map<String, Object> discogsCheck = checkDiscogs();
-        checks.put("discogs", discogsCheck);
-        allHealthy &= (Boolean) discogsCheck.get("healthy");
-        
-        // Check system resources
-        Map<String, Object> systemCheck = checkSystem();
-        checks.put("system", systemCheck);
-        allHealthy &= (Boolean) systemCheck.get("healthy");
-        
-        // Build response
-        health.put("status", allHealthy ? "UP" : "DEGRADED");
-        health.put("timestamp", Instant.now().toString());
-        health.put("checks", checks);
-        health.put("responseTimeMs", System.currentTimeMillis() - startTime);
-        
-        int statusCode = allHealthy ? 200 : 503;
-        HttpUtils.sendJson(exchange, statusCode, health);
+
+        Map<String, Object> redis = checkRedis();
+        Map<String, Object> system = checkSystem();
+        boolean redisReady = !RedisConfig.isRequired() || Boolean.TRUE.equals(redis.get("healthy"));
+        boolean ready = redisReady && Boolean.TRUE.equals(system.get("healthy"));
+        HttpUtils.sendJson(exchange, ready ? 200 : 503, Map.of(
+            "status", ready ? "UP" : "DOWN",
+            "timestamp", Instant.now().toString(),
+            "checks", Map.of(
+                "redis", redis,
+                "system", system,
+                "spotifyBulkhead", ProviderExecutor.status(),
+                "discogsBulkhead", com.hctamlyniv.DiscogsService.providerStatus()
+            )
+        ));
+    }
+
+    private void handleDependencies(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            HttpUtils.sendApiError(exchange, 405, "method_not_allowed", "Only GET is supported");
+            return;
+        }
+        refreshDependenciesIfStale();
+        HttpUtils.sendJson(exchange, 200, dependencySnapshot);
+    }
+
+    private void refreshDependenciesIfStale() {
+        long now = System.currentTimeMillis();
+        if (now - dependencySnapshotAt < Duration.ofSeconds(30).toMillis()) return;
+        if (!dependencyRefreshRunning.compareAndSet(false, true)) return;
+        CompletableFuture.runAsync(() -> {
+            long start = System.currentTimeMillis();
+            Map<String, Object> checks = new HashMap<>();
+            checks.put("spotify", checkSpotify());
+            checks.put("discogs", checkDiscogs());
+            boolean healthy = checks.values().stream()
+                .map(value -> (Map<?, ?>) value)
+                .allMatch(check -> Boolean.TRUE.equals(check.get("healthy")));
+            dependencySnapshot = Map.of(
+                "status", healthy ? "UP" : "DEGRADED",
+                "timestamp", Instant.now().toString(),
+                "checks", checks,
+                "responseTimeMs", System.currentTimeMillis() - start
+            );
+            dependencySnapshotAt = System.currentTimeMillis();
+        }).whenComplete((ignored, error) -> {
+            if (error != null) log.warn("Dependency health refresh failed: {}", error.getClass().getSimpleName());
+            dependencyRefreshRunning.set(false);
+        });
     }
     
     private Map<String, Object> checkRedis() {
@@ -126,7 +152,7 @@ public class HealthRoutes {
         } catch (Exception e) {
             result.put("healthy", false);
             result.put("status", "error");
-            result.put("message", e.getMessage());
+            result.put("message", e.getClass().getSimpleName());
         }
         return result;
     }
@@ -156,7 +182,7 @@ public class HealthRoutes {
         } catch (Exception e) {
             result.put("healthy", false);
             result.put("status", "error");
-            result.put("message", e.getMessage());
+            result.put("message", e.getClass().getSimpleName());
         }
         return result;
     }
@@ -187,7 +213,7 @@ public class HealthRoutes {
         } catch (Exception e) {
             result.put("healthy", false);
             result.put("status", "error");
-            result.put("message", e.getMessage());
+            result.put("message", e.getClass().getSimpleName());
         }
         return result;
     }
@@ -229,7 +255,7 @@ public class HealthRoutes {
             
         } catch (Exception e) {
             result.put("healthy", false);
-            result.put("error", e.getMessage());
+            result.put("error", e.getClass().getSimpleName());
         }
         return result;
     }

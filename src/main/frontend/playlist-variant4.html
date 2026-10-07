@@ -1,20 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-playlist-variant="4">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VinylMatch â€” Playlist</title>
+    <title>VinylMatch — Playlist</title>
 
-    <script>
-      (() => {
-        try {
-          const theme = localStorage.getItem("vinylmatch_theme");
-          if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-        } catch (_) {}
-        // Mark this as variant 4
-        document.documentElement.dataset.playlistVariant = "4";
-      })();
-    </script>
+    <script src="/dist/theme-bootstrap.js"></script>
 
     <link rel="stylesheet" href="/common/header.css">
     <link rel="stylesheet" href="/styles/playlist.css">
@@ -25,7 +16,7 @@
 
 <div id="global-loading" class="loading-overlay hidden" role="alert" aria-live="assertive">
     <div class="spinner" aria-hidden="true"></div>
-    <p id="global-loading-text">Loading playlistâ€¦</p>
+    <p id="global-loading-text">Loading playlist…</p>
 </div>
 
 <div class="sidebar-backdrop hidden" id="discogs-backdrop"></div>
@@ -50,7 +41,7 @@
             </div>
             <p id="playlist-status" class="status-message hidden" role="status" aria-live="polite"></p>
 
-            <div id="playlist" class="playlist-tracks">Loadingâ€¦</div>
+            <div id="playlist" class="playlist-tracks">Loading…</div>
 
             <div class="load-more-wrapper hidden" id="load-more-wrapper">
                 <button type="button" class="btn load-more" id="load-more">Load more</button>
