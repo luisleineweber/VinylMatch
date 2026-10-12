@@ -1,7 +1,7 @@
 # VinylMatch
 
-[![CI](https://github.com/hctamlyniv/VinylMatch/actions/workflows/ci.yml/badge.svg)](https://github.com/hctamlyniv/VinylMatch/actions/workflows/ci.yml)
-[![Deploy](https://github.com/hctamlyniv/VinylMatch/actions/workflows/deploy.yml/badge.svg)](https://github.com/hctamlyniv/VinylMatch/actions/workflows/deploy.yml)
+[![CI](https://github.com/luisleineweber/VinylMatch/actions/workflows/ci.yml/badge.svg)](https://github.com/luisleineweber/VinylMatch/actions/workflows/ci.yml)
+[![Deploy](https://github.com/luisleineweber/VinylMatch/actions/workflows/deploy.yml/badge.svg)](https://github.com/luisleineweber/VinylMatch/actions/workflows/deploy.yml)
 [![Coverage](https://img.shields.io/badge/coverage-gated%20at%2050%25-green.svg)](./pom.xml)
 [![Java 21](https://img.shields.io/badge/Java-21-blue.svg)](https://openjdk.org/projects/jdk/21/)
 [![Runtime](https://img.shields.io/badge/runtime-java--jar-success.svg)](./pom.xml)
@@ -9,6 +9,8 @@
 VinylMatch is a lightweight web app + API that matches Spotify playlist tracks to their corresponding vinyl releases on Discogs (and optionally links out to other vinyl webstores).
 
 It's built for collectors, DJs, archivists, and anyone who wants to connect a digital playlist to physical releases without manually searching every record.
+
+[Open VinylMatch](https://vinylmatch.onrender.com/)
 
 ## Features
 
@@ -55,7 +57,7 @@ The matching engine (`DiscogsService`) uses progressive passes:
 1) Clone
 
 ```bash
-git clone https://github.com/Loues000/VinylMatch.git
+git clone https://github.com/luisleineweber/VinylMatch.git
 cd VinylMatch
 ```
 
@@ -96,102 +98,7 @@ Open `http://localhost:8888/`.
 .\scripts\run.ps1 -Build
 ```
 
-## Hosted Deployment
-
-VinylMatch is designed to run as a hosted multi-user app:
-
-- Build and ship `target/VinylMatch.jar`
-- Run under `systemd` (or similar process manager)
-- Store runtime config only in environment variables
-- Use Redis for persistent sessions in staging/production
-
-### Railway Hosting
-
-Railway is a good fit for VinylMatch because the app already runs as a single Java JAR and exposes a health endpoint on `/api/health/simple`.
-
-#### Railway Setup
-
-1. Create a new Railway project from this GitHub repository.
-2. Add a Redis service in the same Railway project.
-3. Deploy the app service from the repo root.
-4. Add a custom domain in Railway once the first deploy succeeds.
-5. Update the Spotify app's redirect URI to match the final HTTPS domain exactly.
-
-#### Railway Config In Repo
-
-- `railway.json` starts the app with `java -jar target/VinylMatch.jar`.
-- Railway should use `/api/health/simple` as the health check path.
-- Railway injects `PORT`; the app already reads this environment variable.
-- The Maven build path for Railway should be `mvn -B -DskipTests clean package`.
-- Avoid legacy dashboard overrides like `dependency:list install -Pproduction`; they add work without changing the packaged JAR.
-
-#### Railway Environment Variables
-
-Set these in the Railway app service:
-
-| Variable | Required | Railway note |
-|----------|----------|-------------|
-| `NVD_API_KEY` | Recommended | Free NVD API key for OWASP Dependency-Check; prevents shared-CI rate-limit failures |
-| `SPOTIFY_CLIENT_ID` | Yes | From Spotify Developer Dashboard |
-| `SPOTIFY_CLIENT_SECRET` | Yes | From Spotify Developer Dashboard |
-| `SPOTIFY_REDIRECT_URI` | Yes | Set to `https://your-domain/api/auth/callback` |
-| `PUBLIC_BASE_URL` | Yes | Set to `https://your-domain` |
-| `DISCOGS_TOKEN` | Optional | Enables Discogs API matching |
-| `DISCOGS_USER_AGENT` | Recommended | Required by Discogs API terms |
-| `VINYLMATCH_MASTER_KEY` | Yes | Use a long random secret; keep stable across restarts |
-| `REDIS_HOST` | Required in production | Map from Railway Redis host; production fails fast instead of silently using per-instance memory |
-| `REDIS_PORT` | Recommended | Map from Railway Redis port |
-| `REDIS_PASSWORD` | Recommended | Map from Railway Redis password |
-
-If Railway exposes Redis through reference variables instead of fixed names, map them into the app's expected variables `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`.
-
-`pom.xml` wires `NVD_API_KEY` into `dependency-check-maven`. GitHub CI runs the scanner during
-`mvn -B clean verify`; configure the repository secret `NVD_API_KEY` to avoid shared NVD rate limits.
-Confirmed vulnerabilities at CVSS 7 or higher fail verification. Feed/network failures are treated as
-transient (`failOnError=false`), so they warn instead of masking otherwise valid builds; CI always attempts
-to upload the HTML/JSON scan reports, and a missing report is visible as an artifact warning.
-
-#### Domain and Spotify OAuth
-
-After Railway gives you either a generated domain or a custom domain:
-
-1. Set `PUBLIC_BASE_URL=https://your-domain`
-2. Set `SPOTIFY_REDIRECT_URI=https://your-domain/api/auth/callback`
-3. In Spotify Developer Dashboard, add that exact callback URL
-4. Redeploy the Railway service
-
-Spotify redirect URIs must match exactly, including protocol, host, and path.
-
-#### Release Flow On Railway
-
-1. Push code to GitHub.
-2. Railway redeploys the service from the connected repo.
-3. Open `https://your-domain/api/health/ready` to confirm required production dependencies are ready.
-4. Test Spotify login with the hosted callback URL.
-
-### Release Flow
-
-- Push to `develop` to run tests, build `VinylMatch.jar`, and deploy staging via `.github/workflows/deploy.yml`.
-- Create and push a version tag like `v0.1.1` to run the production release path.
-- Tagged releases publish `VinylMatch.jar` to a GitHub Release and then deploy production.
-- Do not use branch pushes to `main` as the production release trigger.
-
-### Release Checklist
-
-1. Run `mvn -B clean verify` locally before cutting a release. This is the same lifecycle used by CI.
-2. Bump the version in `pom.xml` if you are shipping a new public version.
-3. Merge the release candidate to `develop` and verify staging.
-4. Create an annotated tag such as `git tag -a v0.1.1 -m "VinylMatch v0.1.1"` on the commit you want to ship.
-5. Push the tag with `git push origin v0.1.1`.
-6. Confirm the GitHub Release contains `VinylMatch.jar` and the production environment deploy completes successfully.
-
-### GitHub Environment Requirements
-
-- `staging` should hold `STAGING_SSH_HOST`, `STAGING_SSH_USER`, and `STAGING_SSH_KEY`.
-- `production` should hold `PRODUCTION_SSH_HOST`, `PRODUCTION_SSH_USER`, and `PRODUCTION_SSH_KEY`.
-- Configure GitHub Environment protection rules if you want manual approval before production deploys.
-
-### Configuration (Environment Variables)
+## Configuration (Environment Variables)
 
 See `config/env.example` for a complete template.
 
@@ -232,7 +139,7 @@ The playlist cache is deliberately local to one application instance. Memory ent
 `cache/playlists` are not shared or invalidated across replicas, and local snapshots may disappear when
 an instance is replaced. Treat it only as a performance cache; a shared cache would be a separate design.
 
-### Spotify Developer Setup
+## Spotify Developer Setup
 
 1. Create an app in the Spotify Developer Dashboard
 2. Add the redirect URI:
