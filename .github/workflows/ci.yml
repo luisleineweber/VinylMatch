@@ -95,7 +95,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: VinylMatch-jar
           path: target
@@ -123,7 +123,7 @@ jobs:
         with:
           java-version: '21'
           distribution: temurin
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: VinylMatch-jar
           path: target
