@@ -134,7 +134,7 @@ jobs:
         [[ "$STAGING_BASE_URL" =~ ^https?:// ]] || { echo "STAGING_BASE_URL must start with http:// or https://" >&2; exit 1; }
 
     - name: Checkout deployment scripts
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Download release artifact
       uses: actions/download-artifact@v8
@@ -213,7 +213,7 @@ jobs:
         [[ "$PRODUCTION_BASE_URL" =~ ^https?:// ]] || { echo "PRODUCTION_BASE_URL must start with http:// or https://" >&2; exit 1; }
 
     - name: Checkout deployment scripts
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Download release artifact
       uses: actions/download-artifact@v8
