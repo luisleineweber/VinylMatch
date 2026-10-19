@@ -1,3 +1,5 @@
+import { initQuicksearch } from "./quicksearch.js";
+
 export function isTrustedSpotifyAuthCallbackMessage(messageEvent, expectedOrigin, popup) {
     return messageEvent?.origin === expectedOrigin
         && messageEvent?.source === popup
@@ -81,6 +83,7 @@ export async function injectHeader() {
         if (!res.ok)
             throw new Error("HTTP " + res.status);
         container.innerHTML = await res.text();
+        initQuicksearch(container.querySelector("#quicksearch-open"));
         initThemeToggle();
         const authStatus = container.querySelector("#spotify-auth-status");
         const setAuthStatus = (message, tone = "info") => {

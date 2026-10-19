@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hctamlyniv.curation.CuratedLinkStore;
 import com.hctamlyniv.curation.RedisCuratedLinkStore;
 import com.hctamlyniv.discogs.DiscogsApiClient;
+import com.hctamlyniv.discogs.DiscogsCatalog;
 import com.hctamlyniv.discogs.DiscogsCacheStore;
 import com.hctamlyniv.discogs.DiscogsNormalizer;
 import com.hctamlyniv.discogs.DiscogsUrlUtils;
@@ -45,6 +46,7 @@ public class DiscogsService {
 
     private final String userAgent;
     private final DiscogsApiClient apiClient;
+    private final DiscogsCatalog catalog;
 
     public DiscogsService(String token, String userAgent) {
         this(token, null, userAgent, null, null, null);
@@ -69,8 +71,13 @@ public class DiscogsService {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         this.apiClient = new DiscogsApiClient(http, mapper, token, this.userAgent, null, consumerKey, consumerSecret, tokenSecret);
+        this.catalog = new DiscogsCatalog(apiClient);
 
         cacheStore.load();
+    }
+
+    public DiscogsCatalog catalog() {
+        return catalog;
     }
 
     public Optional<String> peekCachedUri(String artist, String album, Integer releaseYear, String barcode) {

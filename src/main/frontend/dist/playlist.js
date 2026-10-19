@@ -528,7 +528,7 @@ async function loadPlaylist(id, pageSize = DEFAULT_PAGE_SIZE) {
     registerPlaylistStatusEvents();
     
     // Load custom vendor configuration (non-blocking)
-    loadCustomVendors().catch(() => {});
+    loadCustomVendors();
     
     // Initialize view toggle with render function
     initViewToggle(state, renderTracks);
