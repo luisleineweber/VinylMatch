@@ -186,8 +186,8 @@ function updateLoadSummary(aggregated) {
     const totalTracks = aggregated?.totalTracks ?? aggregated?.tracks?.filter(Boolean).length ?? 0;
     const loadedTracks = aggregated?.tracks?.filter(Boolean).length ?? 0;
     detail.textContent = aggregated?.hasMore
-        ? `${loadedTracks} of ${totalTracks} tracks ready. Discogs matching is a separate step.`
-        : `${loadedTracks} tracks ready. Discogs matching is a separate step.`;
+        ? `${loadedTracks} of ${totalTracks} tracks ready. Review each match below to choose a pressing.`
+        : `${loadedTracks} tracks ready. Review each match below to choose a pressing.`;
 }
 
 function renderHeader(aggregated) {
@@ -199,7 +199,8 @@ function renderHeader(aggregated) {
     
     const coverImg = document.createElement("img");
     coverImg.src = aggregated?.playlistCoverUrl || PLACEHOLDER_IMG;
-    coverImg.alt = "Playlist Cover";
+    coverImg.alt = "Playlist cover";
+    coverImg.addEventListener("error", () => { coverImg.src = PLACEHOLDER_IMG; }, { once: true });
     
     const headerInfo = document.createElement("div");
     headerInfo.className = "header-info";
@@ -230,8 +231,8 @@ function renderHeader(aggregated) {
     loadLabel.textContent = "Playlist loaded";
     const loadDetail = document.createElement("span");
     loadDetail.textContent = aggregated?.hasMore
-        ? `${loadedTracks} of ${totalTracks} tracks ready. Discogs matching is a separate step.`
-        : `${loadedTracks} tracks ready. Discogs matching is a separate step.`;
+        ? `${loadedTracks} of ${totalTracks} tracks ready. Review each match below to choose a pressing.`
+        : `${loadedTracks} tracks ready. Review each match below to choose a pressing.`;
     loadCopy.appendChild(loadLabel);
     loadDetail.className = "playlist-load-summary__detail";
     loadCopy.appendChild(loadDetail);
@@ -574,7 +575,7 @@ async function loadPlaylist(id, pageSize = DEFAULT_PAGE_SIZE) {
             const selectedAlbums = await handleAlbumSelection(state.aggregated.tracks);
             const filteredTracks = selectedAlbums.length > 0 ? getTracksForSelectedAlbums() : state.aggregated.tracks;
             if (selectedAlbums.length === 0) {
-                setPlaylistStatus("Album extraction unavailable. Showing all tracks.");
+                setPlaylistStatus("Could not group tracks by album. You can still review every track below.");
             }
             
             // Update the aggregated tracks for display

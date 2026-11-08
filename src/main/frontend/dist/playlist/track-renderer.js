@@ -47,60 +47,12 @@ async function checkWantlistMembership(targetUrl) {
     }
 }
 
-const PLACEHOLDER_IMG = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const PLACEHOLDER_IMG = "/assets/record-placeholder.svg";
 const ICON_DISCOGS = `<img class="vm-action-icon vm-action-icon--light" src="/design/discogs_trans_black.svg" alt="" aria-hidden="true"><img class="vm-action-icon vm-action-icon--dark" src="/design/discogs_trans_white.svg" alt="" aria-hidden="true">`;
 const ICON_WANT = `<img class="vm-action-icon vm-action-icon--light" src="/design/heart_trans_black.svg" alt="" aria-hidden="true"><img class="vm-action-icon vm-action-icon--dark" src="/design/heart_trans_white.svg" alt="" aria-hidden="true">`;
 const ICON_LIBRARY_WISHLIST = `<img class="vm-library-icon vm-library-icon--light" src="/design/heart_trans_black.svg" alt="" aria-hidden="true"><img class="vm-library-icon vm-library-icon--dark" src="/design/heart_trans_white.svg" alt="" aria-hidden="true">`;
 const ICON_LIBRARY_OWNED = `<img class="vm-library-icon vm-library-icon--light" src="/design/collection_trans_black.svg" alt="" aria-hidden="true"><img class="vm-library-icon vm-library-icon--dark" src="/design/collection_trans_white.svg" alt="" aria-hidden="true">`;
-const DEFAULT_VENDOR_ICONS = {
-    hhv: { light: "/design/hhv_trans_black.svg", dark: "/design/hhv_trans_white.svg" },
-    jpc: { light: "/design/jpc_trans_black.svg", dark: "/design/jpc_trans_white.svg" },
-    amazon: { light: "/design/amazon_trans_black.svg", dark: "/design/amazon_trans_white.svg" },
-};
-
 let matchEvidenceIdCounter = 0;
-
-function resolveVendorIcons(vendor) {
-    if (!vendor) return null;
-    const fallback = DEFAULT_VENDOR_ICONS[vendor.id] || null;
-    const light = typeof vendor.iconLight === "string"
-        ? vendor.iconLight
-        : (typeof vendor?.icon?.light === "string"
-            ? vendor.icon.light
-            : fallback?.light);
-    const dark = typeof vendor.iconDark === "string"
-        ? vendor.iconDark
-        : (typeof vendor?.icon?.dark === "string"
-            ? vendor.icon.dark
-            : fallback?.dark);
-    if (!light || !dark) return null;
-    return { light, dark };
-}
-
-function appendVendorIcons(link, vendor, fallback) {
-    const icons = resolveVendorIcons(vendor);
-    if (!icons || !fallback) return;
-    const light = document.createElement("img");
-    light.className = "vm-action-icon vm-action-icon--light";
-    light.src = icons.light;
-    light.alt = "";
-    light.setAttribute("aria-hidden", "true");
-    const dark = document.createElement("img");
-    dark.className = "vm-action-icon vm-action-icon--dark";
-    dark.src = icons.dark;
-    dark.alt = "";
-    dark.setAttribute("aria-hidden", "true");
-    const fallbackToLetter = () => {
-        link.classList.remove("vendor-link--has-icon");
-        light.remove();
-        dark.remove();
-    };
-    light.addEventListener("error", fallbackToLetter, { once: true });
-    dark.addEventListener("error", fallbackToLetter, { once: true });
-    link.classList.add("vendor-link--has-icon");
-    link.appendChild(light);
-    link.appendChild(dark);
-}
 
 export function determineMatchQuality(match) {
     if (!match || typeof match !== "object") {
@@ -151,9 +103,8 @@ export function buildVendorLinks(track) {
         const vendorName = vendor.name || vendor.id || "Vendor";
         const fallbackLabel = document.createElement("span");
         fallbackLabel.className = "vm-action-fallback";
-        fallbackLabel.textContent = vendor.label || vendor.id?.charAt(0)?.toUpperCase() || "?";
+        fallbackLabel.textContent = vendorName;
         b.appendChild(fallbackLabel);
-        appendVendorIcons(b, vendor, fallbackLabel);
         b.title = vendorName;
         b.setAttribute("aria-label", vendorName);
         b.classList.add("vendor-link");
@@ -201,6 +152,7 @@ export function createTrackElement(track, index, state) {
     const img = document.createElement("img");
     img.className = "cover";
     img.src = track.coverUrl || PLACEHOLDER_IMG;
+    img.addEventListener("error", () => { img.src = PLACEHOLDER_IMG; }, { once: true });
     img.alt = track.album ? `Album cover for ${track.album}` : "Album cover";
 
     const infoDiv = document.createElement("div");
@@ -333,6 +285,8 @@ export function createTrackElement(track, index, state) {
         };
     };
 
+    const wishlistHint = document.createElement("p");
+    wishlistHint.className = "wishlist-hint";
     const syncWishlistActionState = () => {
         const alreadyTracked = currentLibraryState === "wishlist" || currentLibraryState === "owned";
         const canAdd = hasDirectDiscogsTarget(track.discogsMatch)
@@ -350,6 +304,8 @@ export function createTrackElement(track, index, state) {
         } else {
             wishlistBtn.title = canAdd ? "Add to Discogs wantlist" : "Discogs match required";
         }
+        wishlistHint.textContent = canAdd ? "" : wishlistBtn.title;
+        wishlistHint.hidden = canAdd;
     };
 
     const vendorLinks = buildVendorLinks(track);
@@ -566,6 +522,7 @@ export function createTrackElement(track, index, state) {
     trackDiv.appendChild(img);
     trackDiv.appendChild(infoDiv);
     trackDiv.appendChild(actions);
+    trackDiv.appendChild(wishlistHint);
 
     if (initialState === "found" && track.discogsAlbumUrl) {
         setDiscogsState("found", initialDiscogsMatch ?? track.discogsAlbumUrl);

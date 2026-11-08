@@ -306,3 +306,20 @@
         right: 14px;
     }
 }
+/* Keep the brand and navigation stable on every page. */
+#header { --font-display: system-ui, -apple-system, "Segoe UI", sans-serif; }
+:root { --header-height: 64px; }
+@media (max-width: 600px) {
+ :root { --header-height: 112px; }
+ #header { height: var(--header-height); min-height: 0; display: grid; grid-template-columns: auto 1fr; grid-template-rows: 44px 44px; gap: 0 8px; padding: 8px 12px; }
+ #header .logo { grid-column: 1; grid-row: 1; width: auto; font-size: 12px; letter-spacing: .02em; padding: 0; }
+ #header .navigation-right { grid-column: 2; grid-row: 1; justify-content: flex-end; border: 0; padding: 0; flex-wrap: nowrap; gap: 2px; }
+ #header .navigation-left { grid-column: 1 / -1; grid-row: 2; border: 0; padding: 0; justify-content: flex-start; flex-wrap: nowrap; }
+ #header .navigation a:not(.spotify-btn), #header .navigation button { min-height: 44px; display: inline-flex; align-items: center; padding: 6px 8px; }
+ #header .spotify-btn { font-size: 0; padding: 8px; gap: 4px; box-shadow: none; }
+ #header .spotify-btn::after { content: 'Spotify'; font-size: 12px; }
+ body { padding-top: calc(var(--header-height) + 24px); }
+ .sidebar, .playlist-sidebar { top: var(--header-height); }
+}
+#header .theme-toggle { font-family: system-ui; font-size: 22px; min-width: 44px; min-height: 44px; }
+#header .quicksearch-open { background: transparent; border-color: transparent; }

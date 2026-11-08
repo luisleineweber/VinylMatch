@@ -1078,3 +1078,14 @@ body {
         flex: 1 1 0;
     }
 }
+/* Readable collector controls in both list and grid views. */
+.discogs-action, .vendor-link { min-width: 44px; min-height: 44px; }
+.vendor-link.vendor-link--has-icon .vm-action-fallback { display: inline; }
+.vendor-link.vendor-link--has-icon .vm-action-icon { display: none; }
+.vendor-link { width: auto; padding: 0 10px; }
+.track .artists { font-size: 14px; color: var(--text-secondary); }
+.track .track-title { font-size: 17px; }
+#playlist-header .playlist-title { font-family: Georgia, serif; font-size: clamp(30px, 4vw, 44px); }
+@media (max-width: 600px) { body { padding-top: calc(var(--header-height) + 24px); } }
+.track .wishlist-hint { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary); margin: 0; }
+#playlist-status:not(.hidden) { padding: 14px 16px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 10px; font-size: 14px; line-height: 1.6; }

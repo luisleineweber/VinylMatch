@@ -1,8 +1,8 @@
 /**
  * VinylMatch base styles (minimal)
  * Palette:
- * - Light: #FAFAFA background, #312F2C text
- * - Dark:  #312F2C background, #FAFAFA text
+ * - Light: #f6f5f0 background, #253b33 text
+ * - Dark:  #253b33 background, #f6f5f0 text
  */
 
 :root {
@@ -18,21 +18,21 @@
     --transition-fast: 0.12s ease;
     --transition-normal: 0.2s ease;
 
-    --bg-primary: #FAFAFA;
-    --bg-secondary: #F3F3F3;
+    --bg-primary: #f6f5f0;
+    --bg-secondary: #eeeee7;
     --bg-card: #FFFFFF;
     --bg-elevated: #FFFFFF;
     --bg-overlay: rgba(49, 47, 44, 0.6);
 
-    --text-primary: #312F2C;
+    --text-primary: #253b33;
     --text-secondary: rgba(49, 47, 44, 0.82);
     --text-muted: rgba(49, 47, 44, 0.62);
-    --text-inverse: #FAFAFA;
+    --text-inverse: #f6f5f0;
 
     --border-subtle: rgba(49, 47, 44, 0.10);
     --border-default: rgba(49, 47, 44, 0.16);
 
-    --accent: #312F2C;
+    --accent: #285a49;
     --accent-hover: rgba(49, 47, 44, 0.88);
     --accent-soft: rgba(49, 47, 44, 0.08);
 
@@ -45,22 +45,22 @@
 }
 
 :root[data-theme="dark"] {
-    --bg-primary: #312F2C;
+    --bg-primary: #17211d;
     --bg-secondary: rgba(250, 250, 250, 0.06);
     --bg-card: rgba(250, 250, 250, 0.06);
     --bg-elevated: rgba(250, 250, 250, 0.08);
     --bg-overlay: rgba(0, 0, 0, 0.55);
 
-    --text-primary: #FAFAFA;
+    --text-primary: #f6f5f0;
     --text-secondary: rgba(250, 250, 250, 0.82);
     --text-muted: rgba(250, 250, 250, 0.62);
-    --text-inverse: #312F2C;
+    --text-inverse: #253b33;
 
     --border-subtle: rgba(250, 250, 250, 0.10);
     --border-default: rgba(250, 250, 250, 0.16);
 
-    --accent: #FAFAFA;
-    --accent-hover: rgba(250, 250, 250, 0.9);
+    --accent: #91c4a9;
+    --accent-hover: #a9d8bf;
     --accent-soft: rgba(250, 250, 250, 0.10);
 
     --status-success: #79dba1;
@@ -70,22 +70,22 @@
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) {
-        --bg-primary: #312F2C;
+        --bg-primary: #17211d;
         --bg-secondary: rgba(250, 250, 250, 0.06);
         --bg-card: rgba(250, 250, 250, 0.06);
         --bg-elevated: rgba(250, 250, 250, 0.08);
         --bg-overlay: rgba(0, 0, 0, 0.55);
 
-        --text-primary: #FAFAFA;
+        --text-primary: #f6f5f0;
         --text-secondary: rgba(250, 250, 250, 0.82);
         --text-muted: rgba(250, 250, 250, 0.62);
-        --text-inverse: #312F2C;
+        --text-inverse: #253b33;
 
         --border-subtle: rgba(250, 250, 250, 0.10);
         --border-default: rgba(250, 250, 250, 0.16);
 
-        --accent: #FAFAFA;
-        --accent-hover: rgba(250, 250, 250, 0.9);
+        --accent: #91c4a9;
+        --accent-hover: #a9d8bf;
         --accent-soft: rgba(250, 250, 250, 0.10);
 
         --status-success: #79dba1;
