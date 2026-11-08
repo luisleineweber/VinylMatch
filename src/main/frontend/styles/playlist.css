@@ -1098,3 +1098,10 @@ body {
  .playlist-tracks .track .actions .vendor-link { grid-column: span 2; }
 }
 @media (max-width: 600px) { .playlist-tracks .track { grid-template-columns: 100px minmax(0, 1fr); column-gap: 14px; } }
+:root[data-theme="dark"] #playlist-header img[src$="record-placeholder.svg"],
+:root[data-theme="dark"] .track img.cover[src$="record-placeholder.svg"] { background: #43534b; }
+@media (prefers-color-scheme: dark) {
+ :root:not([data-theme]) #playlist-header img[src$="record-placeholder.svg"],
+ :root:not([data-theme]) .track img.cover[src$="record-placeholder.svg"] { background: #43534b; }
+}
+.playlist-tracks .track[data-match-quality="medium"] { border-left-width: 1px; }

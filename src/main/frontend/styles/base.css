@@ -319,5 +319,3 @@ input:focus, select:focus, textarea:focus {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
-:root[data-theme="dark"] img[src$="record-placeholder.svg"] { background: #263d33; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme]) img[src$="record-placeholder.svg"] { background: #263d33; } }
