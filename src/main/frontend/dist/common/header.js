@@ -125,6 +125,7 @@ export async function injectHeader() {
             const normalizedPath = path === "/" ? "/home.html" : path;
             if (normalizedHref === normalizedPath) {
                 a.classList.add("active");
+                a.setAttribute("aria-current", "page");
             }
         });
         // Spotify-Login-Button erzeugen

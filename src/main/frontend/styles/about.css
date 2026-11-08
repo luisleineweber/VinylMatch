@@ -14,3 +14,4 @@ body { padding: 112px 24px 64px; }
 .tech-badge { padding: 6px 10px; border-radius: 6px; background: var(--bg-secondary); font-size: 12px; }
 @media (max-width: 600px) { body { padding: 88px 20px 32px; } .about-content { padding: 24px 20px; } }
 @media (max-width: 600px) { body { padding-top: calc(var(--header-height) + 24px); } }
+.about-content p, .about-content li { max-width: 70ch; }

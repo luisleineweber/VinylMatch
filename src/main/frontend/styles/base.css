@@ -319,3 +319,6 @@ input:focus, select:focus, textarea:focus {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+:root { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) { color-scheme: dark; } }

@@ -1107,3 +1107,8 @@ body {
 .playlist-tracks .track[data-match-quality="medium"] { border-left-width: 1px; }
 .track .discogs-action.inactive { opacity: 1; color: var(--text-secondary); background: transparent; border-style: dashed; }
 #playlist-header .playlist-load-summary__marker { margin: 7px 3px 0; }
+@media (max-width: 640px) {
+ #playlist-header { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; align-items: center; }
+ #playlist-header img { width: 88px; height: 88px; }
+ #playlist-header .playlist-title { font-size: 28px; }
+}

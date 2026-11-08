@@ -673,3 +673,5 @@ body { padding: 112px 32px 64px; background: var(--bg-primary); }
 .hero-logo-wrap { background: none; padding: 0; }
 .sidebar { box-shadow: none; }
 .page-container.sidebar-open .sidebar { box-shadow: 10px 0 30px rgba(0, 0, 0, .16); }
+#playlist-url::placeholder { color: var(--text-secondary); opacity: 1; }
+@media (max-width: 600px) { .service-note { display: none; } }

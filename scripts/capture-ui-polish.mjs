@@ -17,6 +17,7 @@ for (const theme of ['light','dark']) {
    await page.goto(`http://127.0.0.1:8888${path}`);
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    await page.locator('#header .logo').waitFor();
+   await page.locator('#theme-toggle[aria-pressed]').waitFor();
    if(name==='playlist') await page.getByText('Sunday listening').waitFor();
    await page.evaluate(async () => {
     await document.fonts.ready;
