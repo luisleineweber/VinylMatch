@@ -134,7 +134,7 @@ export async function injectHeader() {
             btn.id = "spotify-login-btn";
             btn.href = "#";
             btn.className = loggedIn ? "spotify-btn logged-in" : "spotify-btn";
-            const iconSrc = loggedIn ? "/design/spotify_green.svg" : "/design/spotify_trans_black.svg";
+            const iconSrc = "/assets/spotify-white.svg";
             const iconClass = loggedIn ? "spotify-logo spotify-logo-green" : "spotify-logo spotify-logo-white";
             btn.innerHTML = `
                 <img class="${iconClass}" src="${iconSrc}" alt="" aria-hidden="true">

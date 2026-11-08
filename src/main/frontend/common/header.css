@@ -335,3 +335,9 @@
  #header .logo { letter-spacing: .08em; }
  #header .spotify-btn.logged-in::after { content: 'Log out'; }
 }
+#header .navigation a.spotify-btn { min-height: 44px; }
+#header button.quicksearch-open { color: var(--text-secondary); }
+#header .spotify-logo { filter: none; opacity: 1; }
+#header .navigation-right { gap: 6px; }
+:root[data-theme="dark"] #header .navigation a.spotify-btn { background: #337458; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) #header .navigation a.spotify-btn { background: #337458; } }

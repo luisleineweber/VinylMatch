@@ -54,13 +54,13 @@
     --text-primary: #f6f5f0;
     --text-secondary: rgba(250, 250, 250, 0.82);
     --text-muted: rgba(250, 250, 250, 0.62);
-    --text-inverse: #253b33;
+    --text-inverse: #f6f5f0;
 
     --border-subtle: rgba(250, 250, 250, 0.10);
     --border-default: rgba(250, 250, 250, 0.16);
 
-    --accent: #91c4a9;
-    --accent-hover: #a9d8bf;
+    --accent: #337458;
+    --accent-hover: #3d8264;
     --accent-soft: rgba(250, 250, 250, 0.10);
 
     --status-success: #79dba1;
@@ -79,13 +79,13 @@
         --text-primary: #f6f5f0;
         --text-secondary: rgba(250, 250, 250, 0.82);
         --text-muted: rgba(250, 250, 250, 0.62);
-        --text-inverse: #253b33;
+        --text-inverse: #f6f5f0;
 
         --border-subtle: rgba(250, 250, 250, 0.10);
         --border-default: rgba(250, 250, 250, 0.16);
 
-        --accent: #91c4a9;
-        --accent-hover: #a9d8bf;
+        --accent: #337458;
+        --accent-hover: #3d8264;
         --accent-soft: rgba(250, 250, 250, 0.10);
 
         --status-success: #79dba1;
@@ -319,5 +319,5 @@ input:focus, select:focus, textarea:focus {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
-:root[data-theme="dark"] img[src$="record-placeholder.svg"] { filter: brightness(.55) saturate(.7); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme]) img[src$="record-placeholder.svg"] { filter: brightness(.55) saturate(.7); } }
+:root[data-theme="dark"] img[src$="record-placeholder.svg"] { background: #263d33; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) img[src$="record-placeholder.svg"] { background: #263d33; } }
