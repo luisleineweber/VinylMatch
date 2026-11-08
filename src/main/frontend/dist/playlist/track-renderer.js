@@ -227,6 +227,7 @@ export function createTrackElement(track, index, state) {
     discogsBtn.classList.add("discogs-action");
     discogsBtn.setAttribute("aria-label", "Search Discogs now");
     discogsBtn.innerHTML = ICON_DISCOGS;
+    discogsBtn.appendChild(document.createTextNode("Discogs"));
     actions.appendChild(discogsBtn);
 
     const wishlistBtn = document.createElement("a");
@@ -285,8 +286,9 @@ export function createTrackElement(track, index, state) {
         };
     };
 
-    const wishlistHint = document.createElement("p");
-    wishlistHint.className = "wishlist-hint";
+    const wishlistHint = document.createElement("span");
+    wishlistHint.className = "wishlist-label";
+    wishlistBtn.appendChild(wishlistHint);
     const syncWishlistActionState = () => {
         const alreadyTracked = currentLibraryState === "wishlist" || currentLibraryState === "owned";
         const canAdd = hasDirectDiscogsTarget(track.discogsMatch)
@@ -304,8 +306,8 @@ export function createTrackElement(track, index, state) {
         } else {
             wishlistBtn.title = canAdd ? "Add to Discogs wantlist" : "Discogs match required";
         }
-        wishlistHint.textContent = canAdd ? "" : wishlistBtn.title;
-        wishlistHint.hidden = canAdd;
+        wishlistHint.textContent = canAdd ? "Save" : (!discogsUiState.loggedIn ? "Sign in to save" : (alreadyTracked ? "Saved" : "Choose pressing"));
+        wishlistBtn.setAttribute("aria-label", wishlistBtn.title);
     };
 
     const vendorLinks = buildVendorLinks(track);
@@ -522,7 +524,6 @@ export function createTrackElement(track, index, state) {
     trackDiv.appendChild(img);
     trackDiv.appendChild(infoDiv);
     trackDiv.appendChild(actions);
-    trackDiv.appendChild(wishlistHint);
 
     if (initialState === "found" && track.discogsAlbumUrl) {
         setDiscogsState("found", initialDiscogsMatch ?? track.discogsAlbumUrl);

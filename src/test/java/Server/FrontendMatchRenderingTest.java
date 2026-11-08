@@ -46,7 +46,7 @@ class FrontendMatchRenderingTest {
 
         assertTrue(coordinator.contains("Playlist loaded"));
         assertTrue(coordinator.contains("tracks ready"));
-        assertTrue(coordinator.contains("Discogs matching is a separate step"));
+        assertTrue(coordinator.contains("Review each match below to choose a pressing"));
         assertTrue(coordinator.contains("updateLoadSummary(aggregated)"));
         assertTrue(renderer.contains("label: \"Verify release\""));
         assertFalse(renderer.contains("label: \"Review needed\""));

@@ -82,12 +82,8 @@
 
   <main class="home-main">
     <section class="hero-card" aria-labelledby="home-hero-title">
-      <div class="hero-logo-wrap">
-        <!-- SVG Logo with light/dark variants -->
-        <img class="hero-logo-svg logo-light" src="/design/logo-black.svg" alt="VinylMatch" aria-hidden="true" />
-        <img class="hero-logo-svg logo-dark" src="/design/logo-white.svg" alt="VinylMatch" aria-hidden="true" />
-        <!-- Fallback PNG -->
-        <img class="hero-logo" src="/design/VM_Logo.png" alt="VinylMatch" width="900" height="600" fetchpriority="high" decoding="async" />
+      <div class="hero-logo-wrap" aria-hidden="true">
+        <img class="hero-record" src="/assets/record-placeholder.svg" alt="" width="240" height="240" />
       </div>
       <div class="hero-content">
         <h1 id="home-hero-title">Your next record<br>is in your playlist.</h1>
@@ -107,7 +103,7 @@
         <p class="service-note">Discogs releases &amp; record stores</p>
       </div>
 
-      <p class="help">Enter a Spotify playlist URL or 22-character playlist ID, then hit "Find records". Official Spotify playlists require a direct URL.</p>
+      <p class="help">Enter a Spotify playlist URL or 22-character playlist ID, then select Find records. Official Spotify playlists require a direct URL.</p>
 
       <div class="input-row">
         <label class="sr-only" for="playlist-url">Spotify playlist URL</label>

@@ -1087,5 +1087,13 @@ body {
 .track .track-title { font-size: 17px; }
 #playlist-header .playlist-title { font-family: Georgia, serif; font-size: clamp(30px, 4vw, 44px); }
 @media (max-width: 600px) { body { padding-top: calc(var(--header-height) + 24px); } }
-.track .wishlist-hint { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary); margin: 0; }
 #playlist-status:not(.hidden) { padding: 14px 16px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 10px; font-size: 14px; line-height: 1.6; }
+.track .discogs-action { width: auto; padding: 0 10px; gap: 6px; font-size: 13px; }
+.track .meta-row { gap: 10px; }
+.track .match-quality, .track .release-year { font-size: 13px; font-weight: 500; }
+#playlist-header .playlist-load-summary { font-size: 14px; line-height: 1.5; }
+@media (max-width: 600px) {
+ .playlist-tracks .track .actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; gap: 8px; }
+ .playlist-tracks .track .actions .discogs-action { grid-column: span 3; }
+ .playlist-tracks .track .actions .vendor-link { grid-column: span 2; }
+}

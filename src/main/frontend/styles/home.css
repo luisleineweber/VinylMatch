@@ -669,3 +669,5 @@ body { padding: 112px 32px 64px; background: var(--bg-primary); }
 #playlist-url { resize: none; }
 @media (max-width: 600px) { .signal-row { grid-template-columns: 1fr; justify-items: start; } }
 .service-note { font: 13px/1.5 var(--font-body); color: var(--text-secondary); }
+.hero-record { width: 100%; height: auto; border-radius: 50%; }
+.hero-logo-wrap { background: none; padding: 0; }

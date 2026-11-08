@@ -18,6 +18,11 @@ for (const theme of ['light','dark']) {
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    await page.locator('#header .logo').waitFor();
    if(name==='playlist') await page.getByText('Sunday listening').waitFor();
+   await page.evaluate(async () => {
+    await document.fonts.ready;
+    for (const img of document.images) img.loading = "eager";
+    await Promise.race([Promise.all([...document.images].map(img => img.decode().catch(() => {}))), new Promise(resolve => setTimeout(resolve, 5000))]);
+   });
    await page.screenshot({path:`${out}/${name}-${theme}-${size}.png`,fullPage:true});
    if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw Error(`Horizontal overflow: ${name} ${size}`);
   }

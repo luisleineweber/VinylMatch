@@ -317,9 +317,21 @@
  #header .navigation-left { grid-column: 1 / -1; grid-row: 2; border: 0; padding: 0; justify-content: flex-start; flex-wrap: nowrap; }
  #header .navigation a:not(.spotify-btn), #header .navigation button { min-height: 44px; display: inline-flex; align-items: center; padding: 6px 8px; }
  #header .spotify-btn { font-size: 0; padding: 8px; gap: 4px; box-shadow: none; }
- #header .spotify-btn::after { content: 'Spotify'; font-size: 12px; }
+ #header .spotify-btn::after { content: 'Log in'; font-size: 12px; }
  body { padding-top: calc(var(--header-height) + 24px); }
  .sidebar, .playlist-sidebar { top: var(--header-height); }
 }
 #header .theme-toggle { font-family: system-ui; font-size: 22px; min-width: 44px; min-height: 44px; }
 #header .quicksearch-open { background: transparent; border-color: transparent; }
+#header .navigation a:not(.spotify-btn), #header .navigation button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+#header button.quicksearch-open { border: 1px solid transparent; background: transparent; }
+#header button.quicksearch-open:hover { background: var(--accent-soft); }
+#header .navigation a.spotify-btn { background: #285a49; box-shadow: none; color: #fff; }
+#header .spotify-logo { filter: brightness(0) invert(1); }
+@media (max-width: 600px) {
+ #header .navigation-left { width: 100%; }
+ #header .navigation-left > li:not(.hidden) { flex: 1; }
+ #header .navigation-left a, #header .navigation-left button.quicksearch-open { width: 100%; }
+ #header .logo { letter-spacing: .08em; }
+ #header .spotify-btn.logged-in::after { content: 'Log out'; }
+}

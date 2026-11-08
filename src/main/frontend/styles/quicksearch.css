@@ -372,9 +372,6 @@ body.quicksearch-open {
         clip-path: inset(50%);
         white-space: nowrap;
     }
-    #header .navigation-left li:first-child {
-        display: none;
-    }
 }
 
 @media (prefers-reduced-motion: no-preference) {
