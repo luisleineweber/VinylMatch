@@ -671,3 +671,5 @@ body { padding: 112px 32px 64px; background: var(--bg-primary); }
 .service-note { font: 13px/1.5 var(--font-body); color: var(--text-secondary); }
 .hero-record { width: 100%; height: auto; border-radius: 50%; }
 .hero-logo-wrap { background: none; padding: 0; }
+.sidebar { box-shadow: none; }
+.page-container.sidebar-open .sidebar { box-shadow: 10px 0 30px rgba(0, 0, 0, .16); }

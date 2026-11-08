@@ -1105,3 +1105,5 @@ body {
  :root:not([data-theme]) .track img.cover[src$="record-placeholder.svg"] { background: #43534b; }
 }
 .playlist-tracks .track[data-match-quality="medium"] { border-left-width: 1px; }
+.track .discogs-action.inactive { opacity: 1; color: var(--text-secondary); background: transparent; border-style: dashed; }
+#playlist-header .playlist-load-summary__marker { margin: 7px 3px 0; }
